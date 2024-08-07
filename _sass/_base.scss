@@ -362,10 +362,16 @@ ul.task-list input[type="checkbox"] {
   border: 0;
   background-color: inherit;
   color: var(--global-text-color);
+  display: flex;
+  align-items: center;
 
   &:hover {
     color: var(--global-hover-color);
   }
+}
+
+#search-toggle .ti-search {
+  display: none; /* Hides the search icon */
 }
 
 // Social (bottom)
@@ -1295,3 +1301,4 @@ ninja-keys::part(ninja-input-wrapper) {
   background-color: var(--global-theme-color);
   color: var(--global-text-color);
 }
+

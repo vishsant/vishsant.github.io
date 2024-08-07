@@ -1,7 +1,7 @@
 ---
 layout: default
 permalink: /blog/
-title: Blog
+title: Writing
 nav: true
 nav_order: 1
 pagination:
@@ -58,9 +58,47 @@ pagination:
 
 {% assign featured_posts = site.posts | where: "featured", "true" %}
 {% if featured_posts.size > 0 %}
+
+
+
+<div class="container mt-5" role="main">
+  <!-- <div class="row justify-content-center"> -->
+    <article class="archive">
+  <div class="table-responsive">
+    <table class="table table-sm table-borderless">
+      {% assign previous_year = nil %}
+      {% for post in site.posts %}
+        <tr>
+            {% capture current_year %}{{ post.date | date: '%Y' }}{% endcapture %}
+            <th style="padding-left: 2em; text-align: left;" scope="row">
+              {% if current_year != previous_year %}
+                {{ current_year }}
+                {% assign previous_year = current_year %}
+              {% else %}
+                &nbsp;
+              {% endif %}
+            </th>
+          <th style="text-align: right" scope="row">{{ post.date | date: '%b %d, %Y' }}</th>
+            <td style="padding-left: 1.5em">
+              {% if post.redirect == blank %}
+                <a class="post-link" href="{{ post.url | relative_url }}">{{ post.title }}</a>
+              {% elsif post.redirect contains '://' %}
+                <a class="post-link" href="{{ post.redirect }}" target="_blank">{{ post.title }}</a>
+              {% else %}
+                <a class="post-link" href="{{ post.redirect | relative_url }}">{{ post.title }}</a>
+              {% endif %}
+            </td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+    </article>
+  <!-- </div> -->
+</div>
+
 <br>
 
-<div class="container featured-posts">
+<!-- <div class="container featured-posts">
 {% assign is_even = featured_posts.size | modulo: 2 %}
 <div class="row row-cols-{% if featured_posts.size <= 2 or is_even == 0 %}2{% else %}3{% endif %}">
 {% for post in featured_posts %}
@@ -176,7 +214,8 @@ pagination:
 
 {% if post.thumbnail %}
 
-</div>
+</div> -->
+
 
   <div class="col-sm-3">
     <img class="card-img" src="{{post.thumbnail | relative_url}}" style="object-fit: cover; height: 90%" alt="image">
