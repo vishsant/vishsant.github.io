@@ -70,7 +70,7 @@ pagination:
       {% for post in site.posts %}
         <tr>
             {% capture current_year %}{{ post.date | date: '%Y' }}{% endcapture %}
-            <th style="padding-left: 2em; text-align: left;" scope="row">
+            <th class="year" style="padding-left: 2em; text-align: left;" scope="row">
               {% if current_year != previous_year %}
                 {{ current_year }}
                 {% assign previous_year = current_year %}
@@ -78,7 +78,7 @@ pagination:
                 &nbsp;
               {% endif %}
             </th>
-          <th style="text-align: right" scope="row">{{ post.date | date: '%b %d, %Y' }}</th>
+          <th style="text-align: right" scope="row">{{ post.date | date: '%m/%d' }}</th>
             <td style="padding-left: 1.5em">
               {% if post.redirect == blank %}
                 <a class="post-link" href="{{ post.url | relative_url }}">{{ post.title }}</a>
@@ -93,6 +93,14 @@ pagination:
     </table>
   </div>
     </article>
+
+  <style>
+  @media only screen and (max-width: 600px) {  /* Change this value for different screen size thresholds */
+    .year {
+      display: none;
+    }
+  }
+</style>
   <!-- </div> -->
 </div>
 

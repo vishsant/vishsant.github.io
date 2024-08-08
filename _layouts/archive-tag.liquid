@@ -14,7 +14,7 @@ layout: default
         {% for post in page.posts %}
           <tr>
             {% capture current_year %}{{ post.date | date: '%Y' }}{% endcapture %}
-            <th>
+            <th class="year">
               {% if current_year != previous_year %}
                 {{ current_year }}
                 {% assign previous_year = current_year %}
@@ -22,7 +22,7 @@ layout: default
                 &nbsp;
               {% endif %}
             </th>
-            <th style="text-align: right" scope="row">{{ post.date | date: '%b %d, %Y' }}</th>
+            <th style="text-align: right" scope="row">{{ post.date | date: '%m/%d' }}</th>
             <td style="padding-left: 1.5em">
               {% if post.redirect == blank %}
                 <a class="post-link" href="{{ post.url | relative_url }}">{{ post.title }}</a>
@@ -37,4 +37,12 @@ layout: default
       </table>
     </div>
   </article>
+
+  <style>
+  @media only screen and (max-width: 600px) {  /* Change this value for different screen size thresholds */
+    .year {
+      display: none;
+    }
+  }
+</style>
 </div>

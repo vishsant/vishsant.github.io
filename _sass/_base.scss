@@ -362,8 +362,6 @@ ul.task-list input[type="checkbox"] {
   border: 0;
   background-color: inherit;
   color: var(--global-text-color);
-  display: flex;
-  align-items: center;
 
   &:hover {
     color: var(--global-hover-color);
