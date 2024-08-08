@@ -48,6 +48,17 @@ layout: default
       {% include news.liquid limit=true %}
     {% endif %}
 
+    <!-- All writing link -->
+    <h6>
+    <a href="{{ '/blog/' | relative_url }}" style="color: var(--global-theme-color); text-decoration: underline; position: relative; display: inline-block;">
+        All writing
+       <!--
+       <span style="content: '➤'; position: absolute; right: -20px; top: 0; style="display: none;">➤</span>
+        --> 
+    </a>
+    </h6>
+
+
     <!-- Selected papers -->
     {% if page.selected_papers %}
       <h2>
