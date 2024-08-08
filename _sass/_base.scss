@@ -512,7 +512,19 @@ footer.sticky-bottom {
 
   h1 {
     color: var(--global-theme-color);
-    font-size: 5rem;
+    font-size: 5rem;  
+
+  }
+
+  /* Media query for mobile */
+  @media (max-width: 768px) {
+    h1 {
+      font-size: 2em;
+    }
+
+    h2 {
+      font-size: .8em;
+    }
   }
 }
 
@@ -531,6 +543,28 @@ footer.sticky-bottom {
       display: inline-block;
       padding: 1rem 0.5rem;
       color: var(--global-text-color-light);
+    }
+  }
+
+  /* Media query for mobile */
+  @media (max-width: 768px) {
+    ul {
+      justify-content: center;
+      display: flow-root;
+  
+      p,
+      li {
+        list-style: none;
+        display: inline-block;
+        padding: 1rem 0.5rem;
+        color: var(--global-text-color-light);
+      }
+
+      /* Hide elements after the third */
+      p:nth-child(n+4),
+      li:nth-child(n+4) {
+        display: none;
+      }
     }
   }
 }
