@@ -2,7 +2,7 @@
 layout: about
 title: About
 permalink: /
-subtitle: <a href='#'>Engineer</a>. Qualcomm India Pvt. Ltd
+subtitle: <a href='https://www.linkedin.com/in/vishsant/'>Engineer</a>. Qualcomm India Pvt. Ltd
 
 profile:
   align: right
@@ -17,6 +17,8 @@ social: true # includes social icons at the bottom of the page
 ---
 
 I have different shades.  
-Sometime, I become a writer, reader, maker and many more.  
+
+Sometime, I become a writer, reader, maker and many more.
+    
 Which one of my shade you what to meet today?  
 

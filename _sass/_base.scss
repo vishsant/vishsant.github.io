@@ -511,9 +511,13 @@ footer.sticky-bottom {
   padding-bottom: 3rem;
 
   h1 {
-    color: var(--global-theme-color);
-    font-size: 5rem;  
+    font-size: 3rem;
+    font-weight: bold;
+  }
 
+  h2 {
+    font-size: 1rem;
+    font-family: 'Roboto';
   }
 
   /* Media query for mobile */
@@ -572,7 +576,7 @@ footer.sticky-bottom {
 .post-title {
   mjx-container[jax="CHTML"][display="true"] {
     display: unset;
-  }
+  }  
 }
 
 .post-list {
@@ -589,7 +593,8 @@ footer.sticky-bottom {
     .post-meta {
       color: var(--global-text-color-light);
       font-size: 0.875rem;
-      margin-bottom: 0;
+      padding-top: 0.25rem;
+      padding-bottom: 0;
     }
 
     .post-tags {
