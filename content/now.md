@@ -2,6 +2,7 @@
 date = "2026-09-06"
 draft = false
 title = "Now"
+type = "now"
 +++
 
 *Last updated September 2026.*
