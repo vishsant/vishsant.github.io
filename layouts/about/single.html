@@ -1,0 +1,53 @@
+{{ define "main" }}
+<article class="about-page">
+
+  <header class="about-header">
+    <a href="/" class="post-back">&larr; Home</a>
+  </header>
+
+  <div class="about-hero">
+    <div class="about-hero-text">
+      <p class="about-title"><strong>Hi, I'm {{ .Site.Params.author }}.</strong></p>
+      {{ .Content }}
+    </div>
+    <div class="about-hero-photo">
+      <img src="/img/avatar.jpg" alt="Portrait of {{ .Site.Params.author }}" class="about-photo">
+    </div>
+  </div>
+
+  <div class="about-body">
+    <h2>Experience</h2>
+
+    <div class="exp-item">
+      <span class="exp-date">2024 → Present</span>
+      <strong>Senior Engineer · Qualcomm</strong>
+      <p>Embedded Linux, Linux Kernel, Device Drivers. Working deep inside the kernel and open-source systems where correctness and concurrency actually matter.</p>
+    </div>
+
+    <div class="exp-item">
+      <span class="exp-date">2022 → 2024</span>
+      <strong>Engineer · Qualcomm</strong>
+      <p>Linux kernel development and systems engineering.</p>
+    </div>
+
+    <div class="exp-item">
+      <span class="exp-date">2022</span>
+      <strong>Senior Software Engineer · Gadgeon Systems Inc.</strong>
+      <p>Design and implementation of Linux-based IoT Gateways for medical and SmartHome applications. Board bring-up for Atmel SAMA5, Freescale i.MX, and Mediatek MT76xx. U-Boot customization and kernel porting.</p>
+    </div>
+
+    <div class="exp-item">
+      <span class="exp-date">2019 → 2021</span>
+      <strong>Software Engineer · Gadgeon Systems Inc.</strong>
+      <p>Firmware development on TiVA-C and MSP432 processors. Embedded application development in C/C++. MQTT, Modbus, TCP/IP, HART-IP, BLE protocols.</p>
+    </div>
+
+    <a href="https://www.linkedin.com/in/vishsant" class="exp-cv-link">Full CV on LinkedIn ›</a>
+  </div>
+
+  <footer class="post-footer">
+    <a href="/" class="post-footer-link">&larr; Home</a>
+  </footer>
+
+</article>
+{{ end }}

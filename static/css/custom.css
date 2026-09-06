@@ -1,0 +1,107 @@
+.home-portrait {
+  top: 0;
+  bottom: auto;
+}
+
+.home-portrait::after {
+  background: linear-gradient(to top, var(--bg-primary), transparent);
+  height: 80px;
+}
+
+.home-portrait::before {
+  background: linear-gradient(to right, var(--bg-primary), transparent);
+  width: 120px;
+}
+
+/* About page */
+.about-title {
+  font-size: 1.4rem;
+  margin-bottom: 1.5rem;
+}
+
+.about-hero-text p {
+  margin-bottom: 1.2rem;
+  line-height: 1.8;
+}
+
+.about-hero {
+  gap: 4rem;
+  align-items: flex-start;
+}
+
+.about-hero-photo {
+  margin-top: 0.5rem;
+}
+
+.exp-item {
+  margin-bottom: 2.5rem;
+}
+
+.exp-date {
+  display: block;
+  color: var(--text-secondary, #888);
+  font-size: 0.9rem;
+  margin-bottom: 0.3rem;
+}
+
+.exp-item strong {
+  font-size: 1.1rem;
+}
+
+.exp-item p {
+  margin-top: 0.5rem;
+  line-height: 1.7;
+}
+
+.exp-cv-link {
+  display: inline-block;
+  margin-top: 1rem;
+  margin-bottom: 3rem;
+}
+
+/* Blog list - year-grouped layout */
+.year-group {
+  margin-bottom: 3rem;
+}
+
+.year-heading {
+  font-size: 1rem;
+  font-weight: bold;
+  margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--text-secondary, #555);
+  padding-bottom: 0.4rem;
+}
+
+.post-entry {
+  margin-bottom: 2rem;
+}
+
+.post-entry-header {
+  display: flex;
+  align-items: baseline;
+  gap: 1.2rem;
+}
+
+.post-entry-date {
+  color: var(--text-secondary, #888);
+  font-size: 0.9rem;
+  min-width: 3.5rem;
+  flex-shrink: 0;
+}
+
+.post-entry-title {
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+.post-entry-summary {
+  color: var(--text-secondary, #999);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin-top: 0.3rem;
+  margin-left: 4.7rem;
+}
+
+.post-listing {
+  display: none;
+}

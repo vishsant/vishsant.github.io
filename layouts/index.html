@@ -1,0 +1,58 @@
+{{ define "main" }}
+<section class="home">
+
+  <header class="home-hero">
+    <div class="home-hero-intro">
+      <h1 class="home-name">{{ .Site.Params.author }}</h1>
+      <p class="home-tagline">{{ .Site.Params.tagline }}</p>
+      <p class="home-bio">{{ .Site.Params.info | markdownify }}</p>
+      <div class="home-links">
+        <a href="mailto:{{ .Site.Params.email }}" class="home-link-btn">Email</a>
+        <a href="https://github.com/vishsant" class="home-link-btn" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+    <div class="home-portrait">
+      <img src="/img/avatar.jpg" alt="Portrait of {{ .Site.Params.author }}" class="home-portrait-img">
+    </div>
+  </header>
+
+  {{ $posts := where .Site.RegularPages "Section" "post" }}
+  {{ if $posts }}
+  <section class="home-section">
+    <h2 class="home-section-heading">
+      <span class="home-section-icon">~</span> Writing
+    </h2>
+    <ul class="home-post-list">
+      {{ range first 5 $posts.ByDate.Reverse }}
+      <li class="home-post-item">
+        <a href="{{ .RelPermalink }}" class="home-post-link">
+          <span class="home-post-title">{{ .Title }}</span>
+          <span class="home-post-date">{{ .Date.Format "Jan 2006" }}</span>
+        </a>
+      </li>
+      {{ end }}
+    </ul>
+    {{ if gt (len $posts) 5 }}
+    <a href="/post/" class="home-see-all">All posts &rarr;</a>
+    {{ end }}
+  </section>
+  {{ end }}
+
+  <section class="home-section">
+    <h2 class="home-section-heading">
+      <span class="home-section-icon">#</span> More
+    </h2>
+    <div class="home-elsewhere">
+      <a href="/notes/" class="elsewhere-card">
+        <span class="elsewhere-name">Digital Garden</span>
+        <span class="elsewhere-desc">Interconnected notes and ideas</span>
+      </a>
+      <a href="/projects/" class="elsewhere-card">
+        <span class="elsewhere-name">Projects</span>
+        <span class="elsewhere-desc">Things I've built</span>
+      </a>
+    </div>
+  </section>
+
+</section>
+{{ end }}

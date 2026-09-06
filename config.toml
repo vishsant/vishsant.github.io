@@ -1,0 +1,54 @@
+baseurl = "https://vishsant.github.io/"
+title = "Vishnu Santhosh"
+theme = "stupidly-minimal"
+locale = "en"
+defaultcontentlanguage = "en"
+
+paginate = 20
+canonifyurls = true
+enableRobotsTXT = true
+enableGitInfo = false
+
+[markup.goldmark.renderer]
+unsafe = true
+
+[markup.highlight]
+noClasses = false
+style = "monokai"
+
+[params]
+    author = "Vishnu Santhosh"
+    tagline = "Linux Kernel Developer / Perpetual Tinkerer"
+    info = "Engineering the Linux kernel stuffs at [Qualcomm](https://www.qualcomm.com/). Powered by random monkey ideas and an unreasonable number of open tabs."
+    description = "Vishnu Santhosh — Developer."
+    keywords = "Vishnu Santhosh, vishsant, developer"
+    avatarurl = "img/avatar.jpg"
+    email = "vishnusanthosh.dev@gmail.com"
+
+    footercontent = ""
+    hidecredits = false
+    hidecopyright = false
+    rtl = false
+    custom_css = ["css/custom.css"]
+
+# Menu links
+[[menu.main]]
+    name = "notes"
+    weight = 1
+    url = "/notes/"
+[[menu.main]]
+    name = "blog"
+    weight = 2
+    url = "/post/"
+[[menu.main]]
+    name = "projects"
+    weight = 3
+    url = "/projects/"
+[[menu.main]]
+    name = "now"
+    weight = 4
+    url = "/now/"
+[[menu.main]]
+    name = "about"
+    weight = 5
+    url = "/about/"

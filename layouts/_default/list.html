@@ -1,0 +1,33 @@
+{{ define "main" }}
+<section class="list-page">
+
+  {{ if .Pages }}
+  {{ $pages := .Pages.ByDate.Reverse }}
+  {{ $prevYear := "" }}
+
+  {{ range $pages }}
+    {{ $year := .Date.Format "2006" }}
+
+    {{ if ne $year $prevYear }}
+      {{ if ne $prevYear "" }}</div>{{ end }}
+      <div class="year-group">
+        <h2 class="year-heading"><span>{{ $year }}</span></h2>
+    {{ end }}
+
+    <div class="post-entry">
+      <div class="post-entry-header">
+        <span class="post-entry-date">{{ .Date.Format "Jan 02" }}</span>
+        <a href="{{ .RelPermalink }}" class="post-entry-title">{{ .Title }} ›</a>
+      </div>
+      {{ with .Summary }}
+      <p class="post-entry-summary">{{ . | plainify | truncate 200 }}</p>
+      {{ end }}
+    </div>
+
+    {{ $prevYear = $year }}
+  {{ end }}
+  {{ if ne $prevYear "" }}</div>{{ end }}
+
+  {{ end }}
+</section>
+{{ end }}

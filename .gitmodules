@@ -1,0 +1,3 @@
+[submodule "themes/stupidly-minimal"]
+	path = themes/stupidly-minimal
+	url = https://github.com/stultus/hugo-stupidly-minimal.git
