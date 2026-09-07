@@ -35,7 +35,7 @@ style = "monokai"
 [[menu.main]]
     name = "notes"
     weight = 1
-    url = "/notes/"
+    url = "/digital-garden/"
 [[menu.main]]
     name = "blog"
     weight = 2
