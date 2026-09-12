@@ -28,9 +28,23 @@ A computer could store 0x12345678 in two ways.
 
 First way: start with the big byte.
 
+```text
+Address 1000: 0x12
+Address 1001: 0x34
+Address 1002: 0x56
+Address 1003: 0x78
+```
+
 Read the addresses left to right and the bytes appear in order. The heavyweight byte leads. This is called big-endian.
 
 Second way: start with the small byte.
+
+```text
+Address 1000: 0x78
+Address 1001: 0x56
+Address 1002: 0x34
+Address 1003: 0x12
+```
 
 Read the addresses left to right and the bytes appear flipped. The lightweight byte leads. This is called little-endian.
 
@@ -54,19 +68,37 @@ Most programming education treats memory as infinite and uniform. You declare an
 
 When you write this in C:
 
+```c
+int x = 1000;
+```
+
 The compiler does something specific. It finds four contiguous bytes. Let's say they start at address 1000. Now the integer 1000 must fit inside these four bytes.
 
 In hexadecimal, 1000 is 0x000003e8. Four bytes: 0x00, 0x00, 0x03, 0xe8. The compiler must decide which byte goes where.
 
 On a little-endian machine:
 
+```text
+0xe8 0x03 0x00 0x00
+```
+
 On a big-endian machine:
+
+```text
+0x00 0x00 0x03 0xe8
+```
 
 Same variable. Same value. But the CPU that executes your code has a preference of byte order while storing it into the memory, wired into silicon. Your code does not decide. The machine does.
 
 This is why endianness matters before you ever touch a network protocol. It matters the moment you take the address of a variable and look at what is actually there.
 
 Consider this code:
+
+```c
+int x = 0x12345678;
+char *p = (char *)&x;
+printf("%02x\n", *p);
+```
 
 You are asking: what byte lives at the address where x begins?
 
@@ -90,6 +122,12 @@ And the answer is:
 
 Here is a simple way to see this difference:
 
+```c
+uint32_t x = 0x12345678;
+uint8_t *p = (uint8_t *)&x;
+for (int i = 0; i < 4; i++) printf("%02x ", p[i]);
+```
+
 On a big-endian machine, you see: 12 34 56 78. The number reads naturally, just as you wrote it. When you look at a memory dump, the value 0x12345678 appears exactly as expected. This is why debugging on big-endian systems feels more intuitive. The hex dump matches your mental model.
 
 On a little-endian machine, you see: 78 56 34 12. The bytes are reversed. Every time you examine memory, you must mentally flip the sequence to understand the value. This creates cognitive friction during debugging sessions.
@@ -106,6 +144,12 @@ It makes certain operations faster. When a processor performs arithmetic, it sta
 
 Little-endian also simplifies pointer casting in subtle ways:
 
+```c
+uint32_t x = 255;
+uint16_t y = *(uint16_t *)&x;
+uint8_t z = *(uint8_t *)&x;
+```
+
 On a ***little-endian*** machine, y is 255 and z is 255. The least significant bytes are at the start, so truncating by casting just works. On a big-endian machine, y would be 0 and z would be 0, because you are reading the high-order zeros.
 
 This is not necessarily better. It is just different. But it explains why certain low-level operations feel more natural on little-endian architectures. ***The address of a value and the address of its least significant portion are the same.***
@@ -113,6 +157,12 @@ This is not necessarily better. It is just different. But it explains why certai
 ***Big-endian*** has no such technical wins. Its ***advantage is purely human readability***. When you debug a network packet or examine a binary file, big-endian lets you see the structure immediately. You do not need to translate. The bytes appear in the order you expect.
 
 Consider reading a file header:
+
+```c
+uint32_t magic, size;
+fread(&magic, 4, 1, fp);
+fread(&size, 4, 1, fp);
+```
 
 If the file uses big-endian and you examine it in a hex editor, you see the magic number and size exactly as specified. If the file uses little-endian, every multibyte value appears reversed. Documentation might say the magic number is 0x89504E47, but in the file you see 47 4E 50 89. You must constantly verify you are reading the bytes in the correct direction.
 
@@ -123,6 +173,12 @@ RFC 1700 declared it network byte order. This was partly because it is human-rea
 What is interesting is that this choice creates a permanent translation layer.
 
 Every little-endian machine on the internet must convert to big-endian when sending data and convert back when receiving:
+
+```c
+uint16_t port = 8080;
+uint16_t network_port = htons(port);
+send(sock, &network_port, 2, 0);
+```
 
 This happens billions of times per second, on every device connected to a network. The cost is negligible in CPU cycles.
 
@@ -158,7 +214,11 @@ If you compile the same code on a big-endian machine, the compiler emits differe
 
 This is why cross-compilation is harder than it looks. If you compile on an x86 machine but target a PowerPC architecture, the compiler must flip its assumptions. It must emit big-endian bytes even though it is running on a little-endian host. The same source code produces different binary representations.
 
-You can verify this yourself.
+You can verify this yourself:
+
+```bash
+lscpu | grep -i endian
+```
 
 This has a surprising implication. An executable compiled for a little-endian machine will not run correctly on a big-endian machine, even if both machines use the same instruction set.
 
@@ -178,13 +238,27 @@ There is a classic example that captures this perfectly. It is called the ***NUX
 
 Imagine you store the string "UNIX" as two 16-bit values. Each character is one byte. The string becomes two shorts: "UN" followed by "IX". You write this code:
 
+```c
+short values[2];
+values[0] = ('U' << 8) | 'N';
+values[1] = ('I' << 8) | 'X';
+```
+
 On the machine where you write this, it works perfectly. You store "UNIX" and when you read it back, you get "UNIX". The machine is internally consistent.
 
 But now you write these two shorts to a file. The file contains four bytes in sequence. On a big-endian machine, memory looks like this:
 
+```text
+U N I X
+```
+
 This makes sense. In the value "UN", the letter U carries more weight (it is multiplied by 256). So U appears first. Same for "IX". The letter I appears before X.
 
 On a little-endian machine, the same code produces different memory:
+
+```text
+N U X I
+```
 
 This also makes sense, from the machine's perspective. Little-endian stores the small byte first. In "UN", the letter N is the low byte. So N appears first. Same for "IX". The letter X appears before I.
 
@@ -206,6 +280,10 @@ Your program needs to send a number. A file size, a port number, a record count.
 
 On your laptop, when stored as a 16-bit unsigned integer, the bytes are:
 
+```text
+0xe8 0x03
+```
+
 You send these bytes over a socket in order: 0xe8, then 0x03.
 
 On the receiving device, the bytes arrive in the same order. But the device is big-endian. It reads multibyte values starting with the big byte. So it interprets the sequence as:
@@ -222,6 +300,12 @@ The ***solution*** is rarely to rewrite the program. It is to make the assumptio
 
 Functions like ***htons()*** and ***ntohs()*** exist only because this collision is inevitable. They convert between host byte order and network byte order. On a big-endian machine, they do nothing. The bytes are already correct. On a little-endian machine, they reverse the bytes.
 
+```c
+uint16_t value = 1000;
+uint16_t network_value = htons(value);
+send(sock, &network_value, sizeof(network_value), 0);
+```
+
 The names are intuitive. Host to network short. Network to host short. Once you know the pattern, you never forget it.
 
 What is interesting is that once a protocol defines byte order, endianness becomes almost invisible. TCP/IP says: network byte order is big-endian. Every system that joins the network agrees to this. Convert on send, convert on receive. The collision is prevented by agreement.
@@ -237,6 +321,13 @@ This is taught mechanically, without surprise. But surprise is hiding inside.
 Pointer arithmetic is how endianness reveals itself. It is the tool that lets you see the bytes as they actually sit in memory.
 
 Consider a structure:
+
+```c
+struct Header {
+    uint16_t magic;
+    uint32_t size;
+};
+```
 
 When you serialize this structure to a file, endianness affects every multibyte field. If you write it on a little-endian machine and read it on a big-endian machine, both fields arrive backward.
 
@@ -289,6 +380,14 @@ This applies to networks, file formats, inter-process communication, anything.
 It is universal.
 
 Here is a small exercise that reveals endianness without memorization:
+
+```c
+uint32_t x = 1;
+if (*(uint8_t *)&x == 1)
+    printf("little-endian\n");
+else
+    printf("big-endian\n");
+```
 
 Once you write experimental code like this, to understand what resides in memory, endianness stops being abstract. It becomes something you can see and touch. And once you can see it, you cannot unsee it.
 

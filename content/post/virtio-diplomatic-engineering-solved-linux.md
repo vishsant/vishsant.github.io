@@ -46,6 +46,14 @@ The problem emerged at the kernel level.
 
 Linux had to carry them all.
 
+```text
+Hypervisor A       Hypervisor B
+    │                  │
+ Driver A           Driver B
+    │                  │
+ [Block][Network]   [Block][Network]
+```
+
 Each driver was different. Each one required maintenance. None of them shared code.
 
 Each new hypervisor multiplied driver count.
@@ -70,6 +78,16 @@ Only the **transport** differs.
 
 Virtio standardizes the driver side and makes the transport pluggable.
 
+```text
+[Block] [Network] [Console]
+          │
+    virtqueue API
+      ┌───┴───┐
+ Transport A  Transport B
+      │           │
+ Hypervisor A  Hypervisor B
+```
+
 The hypervisor implements a small shim layer to connect the standard driver to its own transport. This is far easier than writing a full driver.
 
 Virtio did not win because it was the fastest or the cleverest design.
@@ -88,6 +106,14 @@ Virtio divides virtual I/O into three layers:
 The driver API is what kernel drivers see. A network driver does not talk directly to a hypervisor. It talks to the virtqueues provided by virtio subsystem.
 
 The driver adds buffers, kicks the queue to notify the other side, and retrieves used buffers later.
+
+```c
+struct virtqueue_ops {
+    int  (*add_buf)(...);
+    void (*kick)(...);
+    void *(*get_buf)(...);
+};
+```
 
 That’s it.
 
@@ -128,6 +154,23 @@ In virtio, buffers are described by scatter-gather arrays.
 A single operation might involve multiple non-contiguous chunks of memory. The network driver might use one buffer for headers and another for payload. The block driver might chain together several pages.
 
 Example: a block read.
+
+```c
+struct virtio_blk_outhdr {
+    __u32 type;
+    __u32 ioprio;
+    __u64 sector;
+};
+
+struct scatterlist sg[3];
+struct virtio_blk_outhdr hdr;
+char data[4096];
+__u8 status;
+
+hdr.type = VIRTIO_BLK_T_IN;
+hdr.sector = 1024;
+add_buf(vq, sg, 1, 2, &request);
+```
 
 The driver provides a read-only buffer containing the request metadata (sector number, operation type) and a write-only buffer for the data. The device reads the metadata, performs the read, fills the data buffer, and returns both.
 
@@ -176,17 +219,41 @@ The used ring says *“this work is done”*.
 
 Each structure has a single writer. No locks required.
 
+```c
+struct vring_desc {
+    __u64 addr;
+    __u32 len;
+    __u16 flags;
+    __u16 next;
+};
+```
+
 The flags indicate whether the buffer is read-only or write-only, and whether the next pointer is valid for chaining. This table is shared, but only the driver modifies it. When the driver wants to submit a buffer, it fills in one or more descriptor table entries. If the buffer consists of multiple chunks, it chains them using the next pointers. Each descriptor in the chain points to the next until the last one, which has no next flag.
 
 Descriptor chaining example (block read):
 
 The available ring is how the driver tells the device about new buffers:
 
+```c
+struct vring_avail {
+    __u16 flags;
+    __u16 idx;
+    __u16 ring[NUM];
+};
+```
+
 When the driver finishes setting up a descriptor chain, it writes the index of the chain's head into the available ring and increments idx.
 
 The device reads from the available ring. It maintains its own consumer index tracking which entries it has processed. When new entries appear, the device walks the descriptor chains, processes the buffers, and marks them as used.
 
 The used ring is how the device returns buffers to the driver:
+
+```c
+struct vring_used_elem {
+    __u32 id;
+    __u32 len;
+};
+```
 
 The device increments its own idx as it returns buffers. The driver polls the used ring. When used idx increases, the driver knows buffers have been consumed.
 
@@ -224,6 +291,14 @@ A VM exit costs thousands of cycles. An interrupt costs thousands more.
 
 If every buffer caused a notification, virtio would be slow.
 
+```text
+add_buf: ~50 cycles
+memory barrier: ~100 cycles
+VM exit (kick): ~10,000 cycles
+VM entry (interrupt): ~10,000 cycles
+get_buf: ~50 cycles
+```
+
 So notifications are optional.
 
 Drivers batch buffers before kicking. Devices batch completions before interrupting.
@@ -242,9 +317,15 @@ This makes every capability as opt-in.
 
 The device advertises features. The driver acknowledges the ones it understands.
 
-This avoids compatibility explosions.
+```c
+__u32 device_features = read_device_features();
+__u32 driver_features = 0;
+if (device_features & VIRTIO_NET_F_CSUM)
+    driver_features |= VIRTIO_NET_F_CSUM;
+write_driver_feature(driver_features);
+```
 
-Old drivers work on new devices. New drivers degrade gracefully on old devices.
+This avoids compatibility explosions. work on new devices. New drivers degrade gracefully on old devices.
 
 This negotiation happens once, during device initialization. After that, both sides know exactly what the other supports.
 

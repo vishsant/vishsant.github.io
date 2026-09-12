@@ -16,6 +16,19 @@ This is not a quirk. It is the design.
 
 Here are two real syscalls, side by side, from ***kernel/sys.c*** in the current kernel tree:
 
+```c
+SYSCALL_DEFINE0(getpid)
+{
+    return task_tgid_vnr(current);
+}
+
+/* Thread ID - the internal kernel "pid" */
+SYSCALL_DEFINE0(gettid)
+{
+    return task_pid_vnr(current);
+}
+```
+
 Look closely. ***getpid()*** does not return the PID. It **returns* task_tgid_vnr* - the thread group ID**. The thing you have called "the process ID" your entire career is, inside the kernel, the TGID. The actual per-task identifier - the one the **kernel** calls **pid** - **is** what **gettid()** returns, and **what userspace calls the "thread ID."**
 
 The kernel even leaves a comment admitting it: "Thread ID - the internal kernel 'pid'."
@@ -34,7 +47,18 @@ This is the part most engineers never see. The thread-vs-process duality is a us
 
 ## What Each CLONE Flag Actually Does
 
-The CLONE flags are not preferences. Each one is a pointer-share. Take **CLONE_VM**. When you set it, the new task does not get a copy of the parent's memory descriptor (***mm_struct***). It gets a **pointer** to the same one. Here is the exact branch in copy_mm():
+The CLONE flags are not preferences. Each one is a pointer-share. Take **CLONE_VM**. When you set it, the new task does not get a copy of the parent's memory descriptor (***mm_struct***). It gets a **pointer** to the same one. Here is the exact branch in `copy_mm()`:
+
+```c
+/* kernel/fork.c — copy_mm() */
+
+if (clone_flags & CLONE_VM) {
+    mmget(oldmm);
+    mm = oldmm;
+} else {
+    mm = dup_mm(tsk, current->mm);
+}
+```
 
 That is the entire difference between a thread and a process in one if. **With CLONE_VM**, the **kernel bumps** a **reference count** (***mmget***) and **points the child at the same *mm_struct***. **Without it**, the **kernel calls *dup_mm*** and **builds a fresh address space**. When the parent allocates memory, a CLONE_VM child sees it. When the child writes, the parent sees it.
 
@@ -50,7 +74,20 @@ And then there is the flag that decides everything.
 
 ## The Single if That Creates a Thread
 
-**CLONE_THREAD** is the most important and the most subtle. It is the **flag that decides whether the new task is a thread or a process**, and in the kernel, that decision is literally one branch in copy_process():
+**CLONE_THREAD** is the most important and the most subtle. It is the **flag that decides whether the new task is a thread or a process**, and in the kernel, that decision is literally one branch in `copy_process()`:
+
+```c
+/* kernel/fork.c — copy_process() */
+
+p->pid = pid_nr(pid);
+if (clone_flags & CLONE_THREAD) {
+    p->group_leader = current->group_leader;
+    p->tgid = current->tgid;
+} else {
+    p->group_leader = p;
+    p->tgid = p->pid;
+}
+```
 
 That is the whole thing. That if is the entire conceptual boundary between "thread" and "process" in Linux.
 
@@ -79,6 +116,18 @@ This is the part of the design that is genuinely beautiful. **Linux** did not ad
 **Windows took the other path**. The Windows kernel has a **Thread object and a Process object**, each with their own structure, their own scheduler integration, their own lifecycle. The kernel knows the difference. It has to, because the abstractions were built separately. The trade-off is that Windows can never have a "container" the way Linux has one, because Linux's containers are just tasks with different CLONE flags. They are not a new kind of thing. They are the same thing dialed differently.
 
 ## The Mental Model: The Sharing Spectrum
+
+```text
+Linux Task Sharing Spectrum
+        (configured via clone() flags)
+
+Container Task: clone(CLONE_NEW*)
+        ↓ baseline isolation
+Regular Process: fork() / clone() with minimal sharing
+        ↓ increasing sharing
+POSIX Thread: clone(CLONE_VM | CLONE_FILES | CLONE_FS |
+                    CLONE_SIGHAND | CLONE_THREAD)
+```
 
 Once you internalize this, the whole landscape simplifies. Forget the words "thread" and "process." There is only one primitive in Linux for creating a concurrent task, and it is clone().
 

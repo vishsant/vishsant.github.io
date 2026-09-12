@@ -24,9 +24,26 @@ To answer that, we need a workload whose speed depends almost entirely on one th
 
 I wrote a tiny benchmark that does exactly one thing: it repeatedly walks through a fixed-size buffer and reads one byte from every cache line. The buffer size is the trick. At 256 KB, it is much larger than the core's 32 KB L1 cache but comfortably fits inside its 512 KB L2 cache.
 
+```c
+/* bigger than L1 (32 KB), fits in L2 (512 KB) */
+#define WS (256 * 1024)
+
+/* one timed pass: sweep the whole buffer, read-only, a few times over */
+for (int r = 0; r < 8; r++)
+    for (size_t i = 0; i < WS; i += 64)   /* one 64-byte cache line */
+        sum += buf[i];
+```
+
 Once a core has run this loop, the entire buffer lives in its L2 cache. Run the loop again on the same core, and most reads come straight from that warm cache. Run it on a different core, and that new core starts with an empty L2. It has to fetch the entire working set back into its own cache before it can enjoy those fast accesses.
 
 The loop never changes. The only thing I vary between runs is which CPU executes it, and I control that with one system call: *sched_setaffinity()*. It lets me tell Linux exactly which core the thread is allowed to run on.
+
+```c
+cpu_set_t set;
+CPU_ZERO(&set);
+CPU_SET(target_cpu, &set);
+sched_setaffinity(0, sizeof(set), &set);
+```
 
 From there I tested three situations. In pinned, the thread always runs on core 0, so its cache stays warm. In migrate, the thread moves to a different idle core before every pass, an artificial worst case that starts every pass cold and that no real scheduler would ever inflict. In churn, I still call *sched_setaffinity()* before every pass but pin the thread to the core it is already on, so the kernel runs the same syscall while the thread never moves.
 
@@ -34,9 +51,24 @@ That third case matters. Someone could reasonably argue the slowdown comes from 
 
 Start with the best case.
 
+```console
+$ ./idlecore pinned
+pinned    20570 ns/iter
+```
+
 Each iteration finishes in about 20.6 microseconds, because the thread keeps finding its data exactly where it left it. Now force a migration before every pass.
 
+```console
+$ ./idlecore migrate
+migrate   56266 ns/iter
+```
+
 Same instructions, same data, same machine. The only difference is that every iteration starts on a fresh idle core, and the runtime nearly triples to 56 microseconds. How much of that comes from the migration itself, and how much is just the repeated syscall? Churn answers it.
+
+```console
+$ ./idlecore churn
+churn     22317 ns/iter
+```
 
 Calling *sched_setaffinity()* every iteration moves the runtime from 20.6 to 22.3 microseconds, under two microseconds of overhead. The remaining thirty-four appear only when the thread leaves its core. That is the real penalty, and since I forced the hop every pass, it is the cost of a single migration in isolation, the very cost Linux normally works to avoid.
 

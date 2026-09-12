@@ -54,6 +54,13 @@ The **bug was in an assumption about memory.**
 
 Most programmers imagine memory as a single place.
 
+```text
+A CPU reads address 0x7fff1230.
+That address contains a number.
+Another CPU writes a new number there.
+The next reader sees the new value.
+```
+
 A CPU reads address 0x7fff1230.
 
 That address contains a number.
@@ -78,6 +85,13 @@ Instead, it reads from **cache**.
 
 A typical system looks roughly like this:
 
+| Level | Latency |
+|---|---:|
+| L1 Cache | ~1–4 cycles |
+| L2 Cache | ~10–20 cycles |
+| L3 Cache | ~30–80 cycles |
+| RAM | ~200+ cycles |
+
 At 3 GHz:
 - L1 access ≈ **1 nanosecond**
 - RAM access ≈ **100 nanoseconds**
@@ -93,6 +107,10 @@ Caches exist to prevent that.
 Caches make processors fast by keeping **local copies of data**.
 
 When a CPU loads a value from memory, it does not fetch a single byte.
+
+```bash
+cat /sys/devices/system/cpu/cpu0/cache/index0/coherency_line_size
+```
 
 It fetches a **cache line**, typically **64 bytes**.
 
@@ -115,6 +133,10 @@ Core 0 and Core 1 both load a cache line containing a variable x.
 Both cores now have identical copies.
 
 Then Core 0 writes:
+
+```c
+x = 1;
+```
 
 Core 1 still has its copy.
 
@@ -150,6 +172,13 @@ Most processors implement a protocol called **MESI**.
 
 Each cache line exists in one of four states.
 
+| State | Meaning |
+|---|---|
+| Modified | This core has the only changed copy |
+| Exclusive | This core has the only copy, matching RAM |
+| Shared | Multiple cores have identical copies |
+| Invalid | This copy is stale |
+
 These states allow the processor to track **who owns the truth**.
 
 ## When a Core Wants to Write
@@ -183,6 +212,13 @@ Cache lines are 64 bytes.
 That means unrelated variables can share the same line.
 
 Example:
+
+```c
+struct {
+    int x;
+    int y;
+};
+```
 
 If x and y are used by different threads on different cores, something strange happens.
 
@@ -222,6 +258,13 @@ But it introduces a surprising consequence.
 
 Imagine the following timeline.
 
+```text
+Time 0: Core 0 writes x = 1; the store enters its buffer.
+        Core 0 reads x again and sees 1.
+Time 1: Core 1 reads x and may still see 0.
+Time 2: The store buffer drains; everyone sees 1.
+```
+
 Between Time 0 and Time 2:
 
 Two cores read the same address.
@@ -249,6 +292,16 @@ But it also means loads may happen before you think they do.
 ## The Classic Concurrency Trap
 
 Consider this simple producer - consumer pattern:
+
+```c
+// Producer
+data = 42;
+ready = 1;
+
+// Consumer
+while (ready == 0) {}
+use(data);
+```
 
 Consumer:
 
@@ -280,6 +333,12 @@ The memory model describes what kinds of reordering are allowed.
 
 For example:
 
+| Architecture | Memory model |
+|---|---|
+| x86 | Total Store Order (relatively strong) |
+| ARM | Weak / relaxed |
+| POWER | Very weak |
+
 Stronger models are easier to reason about.
 
 Weaker models give hardware more freedom to optimize.
@@ -293,6 +352,10 @@ A memory barrier tells the CPU:
 **All memory operations before this point must complete before any after it begin.**
 
 Example in C11:
+
+```c
+atomic_thread_fence(memory_order_seq_cst);
+```
 
 Barriers do not change logic.
 

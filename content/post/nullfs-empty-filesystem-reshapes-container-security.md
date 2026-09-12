@@ -174,7 +174,7 @@ NULLFS is merged into Linux 7.0 and enabled by default. For most users, the chan
 
 But the foundation has changed.
 
-Container runtimes can simplify their logic. The pivot dance can be removed. The **switch_root **workaround can finally be retired.
+Container runtimes can simplify their logic. The pivot dance can be removed. The **switch_root** workaround can finally be retired.
 
 Kubernetes operators benefit from faster pod startup and reduced contention on heavily loaded nodes. Multi-tenant clusters gain a stronger isolation baseline by default.
 
@@ -197,8 +197,8 @@ Isolation becomes stronger by default. Instead of relying on cleanup, the system
 Runtime code becomes simpler. Fewer steps, fewer interactions, and fewer opportunities for subtle bugs.
 
 To take advantage of this:
-- Watch for container runtimes adopting OPEN_TREE_NAMESPACE
-- Revisit assumptions about mount isolation and rootfs behavior
+- Watch for container runtimes adopting **OPEN_TREE_NAMESPACE**
+- Revisit assumptions about mount isolation and **rootfs** behavior
 - Remove legacy workarounds tied to the old pivot dance model
 
 In architecture, the strongest structures are not always the ones with the most material. They are the ones that distribute stress through design.

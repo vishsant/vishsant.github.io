@@ -12,7 +12,18 @@ What mmap does is not a load. It is a wiring operation. And the thing it wires y
 
 ## The Call
 
-When you call mmap on a file, the kernel does remarkably little. The system call enters ksys_mmap_pgoff(), which calls do_mmap(), and the critical work happens in mmap_region(). What that function creates is a vm_area_struct, a VMA which is a bookkeeping structure describing a range of virtual addresses in your process.
+When you call mmap on a file, the kernel does remarkably little. The system call enters ksys_mmap_pgoff(), which calls do_mmap(), and the critical work happens in mmap_region(). What that function creates is a `vm_area_struct`, a VMA which is a bookkeeping structure describing a range of virtual addresses in your process.
+
+```c
+struct vm_area_struct {
+    unsigned long vm_start;
+    unsigned long vm_end;
+    struct file *vm_file;
+    const struct vm_operations_struct *vm_ops;
+    pgoff_t vm_pgoff;
+    /* ... */
+};
+```
 
 The VMA records the starting address, the length, permissions, and a pointer to the file's vm_operations_struct, which contains the fault handler the kernel will call later. It gets inserted into the process's VMA tree. Under the default flags, that is the entire operation. No pages are allocated. No data is read from disk. No physical memory is consumed.
 
@@ -22,9 +33,22 @@ The return value you receive, that pointer you can now use like an array, is a v
 
 The first time your code reads or writes an address inside the mapped range, the CPU's MMU walks the page table and finds no valid translation. It raises a page fault. This is not an error. It is the kernel's invitation to do work it deliberately deferred.
 
-The fault enters handle_mm_fault() in mm/memory.c, walks the multi-level page table, and reaches do_fault(). For a file-backed mapping, this calls the VMA's ->fault() handler. Which handler depends on the filesystem. For ext4, that handler is filemap_fault() in mm/filemap.c. And filemap_fault is where the page cache enters the picture.
+The fault enters handle_mm_fault() in mm/memory.c, walks the multi-level page table, and reaches do_fault(). For a file-backed mapping, this calls the VMA's ->fault() handler. Which handler depends on the filesystem. For ext4, that handler is `filemap_fault()` in `mm/filemap.c`. And filemap_fault is where the page cache enters the picture.
 
-The function calls filemap_get_folio() to look up the page in the page cache using the file's address space mapping and the fault's page offset. Two outcomes are possible, and the difference between them is the single most important performance characteristic of mmap.
+```c
+vm_fault_t filemap_fault(struct vm_fault *vmf)
+{
+    struct file *file = vmf->vma->vm_file;
+    struct address_space *mapping = file->f_mapping;
+    pgoff_t index = vmf->pgoff;
+    struct folio *folio;
+    ...
+    folio = filemap_get_folio(mapping, index);
+    ...
+}
+```
+
+The function calls `filemap_get_folio()` filemap_get_folio() to look up the page in the page cache using the file's address space mapping and the fault's page offset. Two outcomes are possible, and the difference between them is the single most important performance characteristic of mmap.
 
 If the page is already in the cache, because someone read this region recently, or another process already faulted on the same page, the lookup succeeds without disk I/O. The kernel installs a page table entry pointing at the cached page and returns. This is a minor fault. The process resumes and the data is waiting, with no disk access. Cost: microseconds.
 
@@ -32,11 +56,27 @@ If the page is not in the cache, the kernel reads it from the filesystem, insert
 
 The ratio of minor to major faults tells you how well your mmap workload is served by the page cache. You can see it live:
 
+```console
+$ ps -o min_flt,maj_flt -p <PID>
+ MINFL  MAJFL
+ 84721      3
+```
+
 A process with 84,721 minor faults and 3 major faults is living almost entirely in the page cache. A process with major faults climbing steadily is fighting for memory.
 
 ## The Cache
 
 The page cache is the detail that makes everything else about mmap make sense. It is a system-wide cache of file data, indexed by (inode, offset) pairs, and it is the same cache that read() and write() use. When you call read() on a file, the kernel copies data from the page cache into your user-space buffer. When you mmap the same file, the kernel skips the copy and points your page table directly at the page cache pages.
+
+```text
+read() path:
+  disk  ──►  page cache  ──►  memcpy  ──►  user buffer
+                                             (your copy)
+
+mmap path:
+  disk  ──►  page cache  ◄── PTE ──  your pointer
+              (shared)                (not a copy)
+```
 
 This is the fundamental difference. read() gives you a private copy of the data in a buffer you own. mmap gives you a view of the data where it already lives. One involves a memcpy from kernel space to user space on every call. The other involves a page table update once, on the first fault, and then direct memory access from that point forward.
 

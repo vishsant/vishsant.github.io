@@ -125,6 +125,23 @@ Linux invented a fiction.
 
 The **platform bus**.
 
+```c
+struct bus_type {
+    const char *name;
+    int (*match)(struct device *, struct device_driver *);
+    int (*probe)(struct device *);
+    void (*remove)(struct device *);
+};
+```
+
+```c
+static struct platform_driver my_driver = {
+    .probe = my_probe,
+    .remove = my_remove,
+    .driver = { .name = "my-sensor" },
+};
+```
+
 It has no wires. No physical presence. It exists only as an idea.
 
 Hardware descriptions come from device trees or ACPI tables. The kernel reads them. Creates platform devices. Registers them on the platform bus.
@@ -145,7 +162,16 @@ Every bus defines a match function.
 
 PCI matching:
 
+```c
+return pci_match_id(pdrv->id_table, pdev) != NULL;
+```
+
 Platform matching:
+
+```c
+return of_device_is_compatible(pdev->dev.of_node,
+                               drv->of_match_table);
+```
 
 That function answers one question:
 
@@ -182,6 +208,14 @@ They have no hardware. Yet they behave like devices.
 They appear in */dev*. They expose metadata. They integrate with user space tools.
 
 Why?
+
+```text
+Common drivers: Block | Network | Console
+                         ↓
+              virtual bus / device model
+                         ↓
+             physical or software devices
+```
 
 Because they register on virtual buses.
 

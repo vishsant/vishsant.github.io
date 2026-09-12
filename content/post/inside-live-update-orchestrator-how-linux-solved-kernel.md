@@ -32,19 +32,53 @@ This became **Kexec Handover, or KHO**. It merged in Linux 6.16 in June 2025.
 
 Three layers. Understanding them is the key to understanding why it works.
 
+```text
+┌─────────────────────────────────────────────────┐
+│ Layer 3: LUO (Live Update Orchestrator)        │ Linux 6.19
+│ State machine + subsystem callback orchestration│
+│ Userspace interface: /dev/liveupdate            │
+├─────────────────────────────────────────────────┤
+│ Layer 2: KHO (Kexec Handover)                  │ Linux 6.16
+│ Memory preservation + FDT metadata passing      │
+│ Per-NUMA-node scratch regions (CMA-backed)      │
+├─────────────────────────────────────────────────┤
+│ Layer 1: kexec                                 │ (existing)
+│ Direct kernel-to-kernel boot, bypasses BIOS     │
+│ Standard: resets all devices, no state         │
+└─────────────────────────────────────────────────┘
+```
+
 **Layer 1 is kexec** - it's been around for years. Jump from one kernel to another without touching BIOS or firmware, saving tens of seconds of POST time. Standard kexec is destructive, though. All state is gone.
 
-**Layer 2 is KHO**, the memory layer. When a subsystem wants memory to survive the kexec, it calls . KHO tracks every preserved folio, coalesces them into contiguous regions where possible, and serializes metadata into an FDT blob. The new kernel reads the FDT during early boot, marks preserved regions as reserved, and subsystems call  to reclaim their pages. To the new kernel, those pages look like it allocated them.
+**Layer 2 is KHO**, the memory layer. When a subsystem wants memory to survive the kexec, it calls `kho_preserve_folio()`. KHO tracks every preserved folio, coalesces them into contiguous regions where possible, and serializes metadata into an FDT blob. The new kernel reads the FDT during early boot, marks preserved regions as reserved, and subsystems call `kho_restore_folio()` to reclaim their pages. To the new kernel, those pages look like it allocated them.
 
 But KHO has a bootstrap problem. The new kernel needs physically contiguous memory to boot - page tables, initial data structures, decompression buffers. That memory can't overlap with preserved pages. The solution is scratch regions: CMA-backed areas pre-allocated on each NUMA node. Because CMA guarantees only movable pages live inside, preserved pages never end up there. After the kexec, the scratch regions get reused, which means the kernel can be swapped again and again without accumulating overhead.
 
 **Layer 3 is LUO**, the orchestration layer. KHO preserves memory. LUO decides when and in what order. It provides a state machine that coordinates the entire transition:
+
+```text
+NORMAL ──PREPARE──► PREPARED
+  ▲                    │
+  │                 FREEZE
+  │                    ▼
+  └── FINISH ── UPDATED ◄── FROZEN ── kexec
+```
 
 In NORMAL state, everything runs as usual. When an update starts, LUO moves to PREPARED: subsystems serialize their state while workloads keep running. Preparation happens while VMs are still active. The FREEZE transition - triggered by the reboot syscall - stops workloads and moves the system to FROZEN. That window is designed to be sub-second. Then kexec fires, the new kernel boots, reads the KHO manifest, and enters UPDATED. Subsystems restore their state, and LUO moves back to NORMAL.
 
 If anything fails during the freeze, LUO calls  on every subsystem that already froze, rolling back to PREPARED. The workload resumes. The update can be retried or cancelled.
 
 ## What survives, what gets rebuilt
+
+```text
+Preserved across kexec       │ Rebuilt from scratch
+─────────────────────────────┼──────────────────────
+VM guest RAM                 │ Kernel page tables
+IOMMU page tables             │ Scheduler state
+VFIO device context           │ Userspace processes
+DMA mappings                  │ Network stack
+KVM virtual machine state     │ Filesystem mounts
+```
 
 The **left column is what matters.** VM guest RAM is preserved. The IOMMU page tables that map device DMA into guest memory are preserved. The VFIO device context - PCI config space, BAR mappings - for passthrough devices is preserved. DMA keeps running during the transition. The guest never knows the host kernel changed underneath it.
 

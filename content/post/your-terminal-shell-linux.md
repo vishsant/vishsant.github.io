@@ -12,7 +12,12 @@ This article traces the entire path - from the moment you press a key in your te
 
 ## The Two Halves
 
-Open two terminal windows on a Linux system. In each one, run the command tty.
+Open two terminal windows on a Linux system. In each one, run the command:
+
+```console
+$ tty
+/dev/pts/0
+```
 
 You will see two different paths. Something like ***/dev/pts/0*** in one and ***/dev/pts/1*** in the other. Those are real files. You can ***stat*** them. You can read their inode numbers. They are character devices, the same class of file that the kernel uses to represent ***/dev/null, /dev/random***, and every serial port and hardware terminal it has ever supported.PTY master slave dev nodes
 
@@ -44,6 +49,23 @@ This is the why behind the PTY's existence. PTYs were not invented to forward by
 
 When a process wants to create a new PTY pair, it follows a five-step protocol:
 
+```text
+1. fd = posix_openpt(O_RDWR | O_NOCTTY)
+       → allocates new master/slave pair, returns master fd
+
+2. grantpt(fd)
+       → sets ownership/permission on the slave device
+
+3. unlockpt(fd)
+       → unlocks the slave (default state is locked, prevents races)
+
+4. slave_path = ptsname(fd)
+       → returns /dev/pts/N for this pair's slave
+
+5. slave_fd = open(slave_path, O_RDWR)
+       → opens the slave
+```
+
 After step 5, the process has both ends of the pair. It can now do something like fork(), give the slave end to the child as stdin/stdout/stderr, and keep the master in the parent. The parent becomes the "terminal emulator" for the child - it reads what the child writes by reading from the master, and it injects input into the child by writing to the master.
 
 ## Where the Slaves Live: devpts
@@ -67,6 +89,23 @@ None of those operations make sense on a pipe. A pipe has no concept of "termina
 ---
 
 So, the entire architecture can be consolidated to:
+
+```text
+Keyboard
+   ↓
+Terminal Emulator
+(kitty, gnome-terminal)
+   ↓
+PTY Master
+   ↓
+Kernel Line Discipline
+   ↓
+PTY Slave
+   ↓
+Shell (bash/zsh)
+   ↓
+Programs (vim, gcc, python)
+```
 
 The next time you open a terminal, remember what is actually happening. Your terminal emulator launched, opened /dev/ptmx, received a master file descriptor, and asked the kernel for a fresh slave device. The kernel created /dev/pts/N and handed back the path. The emulator forked, the child became a session leader, opened the slave as its controlling terminal, and executed your shell. From that point on, every byte you type travels through a 50-year-old contract maintained by a kernel module that nobody talks about.
 

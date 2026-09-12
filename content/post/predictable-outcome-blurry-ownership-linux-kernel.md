@@ -40,6 +40,13 @@ Like paying back the same debt twice when you only borrowed once.
 
 Let’s walk through a common scenario:
 
+```c
+void *ptr = kmalloc(256, GFP_KERNEL);
+kfree(ptr);
+void *ptr2 = kmalloc(256, GFP_KERNEL);
+kfree(ptr); /* BUG: ptr2 may be using this memory. */
+```
+
 The kernel did nothing wrong. It followed its side of the contract faithfully.
 
 But **your pointer didn’t know its owner changed.** It still pointed to an address that now belonged to someone else.
@@ -97,6 +104,17 @@ Multiple owners. Last one out turns off the lights. Complex because everyone nee
 **The problem:** Your code lives in one model. The function you're calling lives in another. The boundary between them is invisible.
 
 A Real Example: The USB MIDI Double Free:
+
+```c
+midi = kmalloc(...);
+if (register_audio_device(&midi->audio) < 0)
+    goto error;
+if (register_usb_interface(midi) < 0)
+    goto error;
+return 0;
+error:
+    kfree(midi); /* WRONG: ownership was transferred */
+```
 
 **The boundary violation:** Registration transferred ownership. Error handler didn't respect that transfer.
 

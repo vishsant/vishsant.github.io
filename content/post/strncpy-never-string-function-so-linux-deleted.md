@@ -12,7 +12,12 @@ That lesson is half right, and the missing half is where the problem is. *strncp
 
 In early Unix, a directory was a flat file of fixed-size records. Each entry was sixteen bytes: a two-byte inode number followed by a fourteen-byte filename. Fourteen bytes, exactly - not "up to fourteen." The slot was a fixed-width field on disk, and a filename shorter than fourteen characters had to be padded so the record layout stayed predictable.
 
-strncpy()'s behavior fits this job exactly. Read its real behavior against that purpose and every "quirk" turns out to be a feature:
+`strncpy()`'s behavior fits this job exactly. Read its real behavior against that purpose and every "quirk" turns out to be a feature:
+
+```c
+/* Copy src into a fixed-width dest field of n bytes. */
+char *strncpy(char *dest, const char *src, size_t n);
+```
 
 It copies at most *n* bytes from *src*. If *src* is shorter than *n*, it pads the entire remainder of *dest *with \0 bytes - so the fourteen-byte slot is fully defined, every time. And if *src* is exactly *n* bytes or longer, it copies *n* bytes and stops. No terminator is added, because the field is fourteen bytes whether or not the name fills it; there is no room reserved for a NUL and none was ever promised.
 
@@ -20,7 +25,17 @@ This is a disk-format tool. It writes fixed-width records. It was doing its job 
 
 ## The Lie
 
-The gap between what we think* strncpy()* promises and what it does fits in three lines:
+The gap between what we think `strncpy()` promises and what it does fits in three lines:
+
+```c
+char buf[5];
+
+/* copies 'h','e','l','l','o' - fills all 5 bytes */
+strncpy(buf, "hello", 5);
+
+/* there is no \0 - printf keeps reading */
+printf("%s\\n", buf);
+```
 
 "hello" is five characters. *buf *is five bytes. *strncpy() *faithfully copies all five and now there is no sixth byte to hold the terminator. *buf* is a character array that is not a string, because a C string is defined as bytes followed by a \0, and this one has no \0. The copy reported no error. Nothing crashed. You have a live landmine.
 
@@ -28,9 +43,25 @@ The danger moved downstream, to the next read. *printf("%s"), strlen(), strcat()
 
 Compile that snippet with the address sanitizer and the tool catches the read the language won't:
 
+```console
+$ gcc -fsanitize=address -g overread.c -o overread
+$ ./overread
+==...==ERROR: AddressSanitizer: stack-buffer-overflow ...
+    READ of size 7 at 0x... thread T0
+    ...
+    [32, 37) 'buf' <== Memory access at offset 37 overflows this variable
+```
+
 The READ past a 5-byte buffer is the whole story: the program tried to read off the end because the terminator *strncpy()* "should" have written was never there.
 
-The padding behavior hides a second issue. Because *strncpy()* zero-fills all unused bytes, copying a short string into a large field is not cheap:
+The padding behavior hides a second issue. Because `strncpy()` zero-fills all unused bytes, copying a short string into a large field is not cheap:
+
+```c
+char line[4096];
+
+/* copies 2 bytes, then zeroes 4094 more */
+strncpy(line, "ok", sizeof(line));
+```
 
 Two useful bytes, and the function dutifully writes four thousand and ninety-four zeros after them, every call. You reach for *strncpy() *believing it is the careful, defensive choice. Often it manages to be both unsafe and slow at once: unsafe when the source is long, wasteful when it is short.
 
@@ -50,9 +81,20 @@ The bug was never in any one function. The bug is that a C string does not know 
 
 The Linux kernel could not ship a string copier with a known overread, a missing terminator, or a hidden full-source scan. So in 2015, kernel 4.3 introduced a fourth function, designed by reading the failures of the first three and refusing all of them:
 
-*strscpy *copies bytes until it hits the source's \0 or it has filled all but the last slot, then it always writes the \0 into that reserved last slot. So the destination is always a real string. That closes *strncpy()*'s failure. It stops at count and never runs a full* strlen()* of the source, so it cannot walk off the end of the source the way *strlcpy() *can. That closes *strlcpy()*'s failure too. (To be precise: for speed, *strscpy() *reads the source a machine word at a time, so it may touch a few bytes past the copied content within the same aligned word - bounded, never across a page boundary, and never the unbounded source scan *strlcpy()* performs. KASAN once flagged exactly this, which is how I got to know the boundary is real.) And it returns the number of bytes copied on success, or the negative error code -E2BIG when the source did not fit. Truncation stops being a silent event the caller must chase with a second *strlen()*: *strscpy() *returns it as a value to check.
+```c
+ssize_t strscpy(char *dest, const char *src, size_t count);
+```
 
-The kernel's own documentation spells out the hierarchy. From *Documentation/process/deprecated.rst*, the file that lists the functions you are no longer allowed to use:
+`strscpy()` copies bytes until it hits the source's \0 or it has filled all but the last slot, then it always writes the \0 into that reserved last slot. So the destination is always a real string. That closes *strncpy()*'s failure. It stops at count and never runs a full* strlen()* of the source, so it cannot walk off the end of the source the way *strlcpy() *can. That closes *strlcpy()*'s failure too. (To be precise: for speed, *strscpy() *reads the source a machine word at a time, so it may touch a few bytes past the copied content within the same aligned word - bounded, never across a page boundary, and never the unbounded source scan *strlcpy()* performs. KASAN once flagged exactly this, which is how I got to know the boundary is real.) And it returns the number of bytes copied on success, or the negative error code -E2BIG when the source did not fit. Truncation stops being a silent event the caller must chase with a second *strlen()*: *strscpy() *returns it as a value to check.
+
+The kernel's own documentation spells out the hierarchy. From `Documentation/process/deprecated.rst`, the file that lists the functions you are no longer allowed to use:
+
+```text
+strcpy()    — deprecated; performs no bounds checking.
+strncpy()   — deprecated on NUL-terminated strings; does not guarantee termination.
+strlcpy()   — deprecated; reads the source in full (may read past the buffer).
+Use strscpy() instead.
+```
 
 ## The Six-Year Delete
 

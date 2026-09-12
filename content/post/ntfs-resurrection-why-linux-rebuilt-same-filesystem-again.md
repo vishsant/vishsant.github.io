@@ -40,6 +40,34 @@ It worked - and for many users, that was enough.
 
 But FUSE introduces a structural limitation. Each filesystem operation crosses the kernel-userspace boundary multiple times.
 
+```text
+[ Application ]
+   │  write("file.txt", data)
+   ▼
+[ Kernel Entry ]
+   │  (User → Kernel boundary)
+   ▼
+[ VFS ]
+   │
+   ▼
+[ FUSE Kernel Module ]
+   │  Packages request
+   ▼
+⚠ Context Switch
+   │  (Kernel → Userspace)
+   ▼
+[ NTFS-3G Daemon ]
+   │  Interprets filesystem logic
+   ▼
+⚠ Syscall
+   │  (Userspace → Kernel again)
+   ▼
+[ Kernel Block Layer ]
+   │  Writes to disk
+   ▼
+[ Disk ]
+```
+
 In a FUSE-based filesystem like NTFS-3G, the write() call takes a longer path. The request first enters the kernel, but instead of being handled there, it is passed to the FUSE module, which forwards it to a userspace daemon. This requires a context switch from kernel space to userspace.
 
 The userspace daemon (NTFS-3G) then interprets the request figuring out where the data should go in the NTFS structure. Once it has done that, it makes another system call back into the kernel to perform the actual disk write. After the write completes, the response travels back through the same path in reverse.
@@ -53,6 +81,27 @@ The compromise was real. But it was the best option available for fifteen years.
 In 2021, **Paragon Software** introduced **NTFS3, a fully in-kernel NTFS driver**. It eliminated FUSE overhead, delivered strong performance, and provided full read-write support.
 
 For the first time, Linux had a native NTFS implementation that could compete with its own filesystems in terms of integration.
+
+```text
+[ Application ]
+   │  write("file.txt", data)
+   ▼
+[ Kernel Entry ]
+   ▼
+[ VFS ]
+   │  Resolves file + permissions
+   ▼
+[ Filesystem (NTFS3/ext4/XFS) ]
+   │  Maps file offset → disk blocks
+   ▼
+[ Page Cache ]
+   │  Stores data in memory
+   ▼
+[ Block Layer ]
+   │  Schedules disk write
+   ▼
+[ Disk ]
+```
 
 In an in-kernel filesystem, the flow is direct. When an application calls write(), the request crosses into the kernel once and stays there. The VFS resolves the file, the filesystem maps it to disk blocks, and the data is written into the page cache. From there, the kernel decides when to flush it to disk through the block layer.
 

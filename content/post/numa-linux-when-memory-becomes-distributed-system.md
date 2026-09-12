@@ -62,6 +62,20 @@ It is four tightly coupled machines.
 
 Each socket and its RAM form a **node**.
 
+```text
+Node 0              Node 1
+┌──────┐            ┌──────┐
+│ CPU  │            │ CPU  │
+│ 64GB │            │ 64GB │
+└──┬───┘            └──┬───┘
+   └────── interconnect ─┘
+┌──────┐            ┌──────┐
+│ CPU  │            │ CPU  │
+│ 64GB │            │ 64GB │
+└──────┘            └──────┘
+Node 2              Node 3
+```
+
 Accessing local memory:
 
 CPU → Local Memory Controller → RAM
@@ -103,6 +117,10 @@ And a **distance matrix** describing how far each node sits from every other nod
 
 You can inspect it:
 
+```bash
+cat /sys/devices/system/node/node*/distance
+```
+
 A simple four-socket system might show:
 
 The distances are not in nanoseconds.
@@ -117,7 +135,17 @@ Every memory allocation decision consults this map.
 
 The abstraction your process sees:
 
+```text
+[Virtual Address] → [Physical Memory]
+```
+
 The topology the kernel manages:
+
+```text
+[Virtual Address] → [Node 0 RAM] or [Node 1 RAM]
+                       local          remote
+                       ~80ns          ~180ns
+``` the kernel manages:
 
 When a process asks for memory, the kernel prefers the node where the process runs. If that node has free memory, the allocation stays local. If not, the kernel looks at the distance table and picks the nearest node with space.
 
@@ -140,6 +168,13 @@ This works beautifully for single-threaded programs.
 It breaks subtly for parallel ones.
 
 Example:
+
+```c
+char *buf = malloc(SIZE);
+#pragma omp parallel for
+for (int i = 0; i < SIZE; i++)
+    buf[i] = 0;
+```
 
 The loop iterations are divided among multiple threads (typically one per CPU core). Each thread initializes a different chunk of the buffer. Because of first-touch policy, the physical page for each chunk is allocated on the NUMA node where the thread that first touches it runs. Because of this buffer's pages are spread across all nodes.
 
@@ -165,7 +200,14 @@ The scheduler does not care about memory.
 
 It cares about CPU load.
 
-If one core is busy and another is idle, the scheduler moves a task. The task might have been running on node zero for an hour. It might have allocated gigabytes of local memory. The scheduler does not check. It sees an imbalance, and it acts.
+If one core is busy and another is idle, the scheduler moves a task.
+
+```text
+Time 0: Task on Node 0 → local memory
+Time 1: Task migrates to Node 1 → Node 0 pages are remote
+```
+
+Now: The task might have been running on node zero for an hour. It might have allocated gigabytes of local memory. The scheduler does not check. It sees an imbalance, and it acts.
 
 Now:
 - CPU is on Node 1
@@ -211,6 +253,12 @@ That sounds large.
 
 A single core can generate 10–20 GB/s during streaming workloads. Four cores can saturate a link. Eight cores can oversubscribe it by a factor of two.
 
+```text
+Interconnect capacity: 40 GB/s
+Demand: 4 × 15 GB/s = 60 GB/s
+Delivered: 40 GB/s; latency: 3–5× higher
+```
+
 When saturation occurs:
 - Latency spikes
 - Throughput collapses
@@ -254,7 +302,13 @@ High-performance databases. In-memory analytics engines. Real-time systems.
 
 For them, memory placement becomes architecture.
 
-They can use *mbind()* to pin memory to specific nodes. They can use *numa_alloc_onnode()* to allocate explicitly. They can use *migrate_pages()* to move memory manually. They can set CPU affinity to control where threads run.
+They can use `mbind()` to pin memory to specific nodes.
+
+```bash
+numactl --cpunodebind=0 --membind=0 ./application
+```
+
+They can use They can use *numa_alloc_onnode()* to allocate explicitly. They can use *migrate_pages()* to move memory manually. They can set CPU affinity to control where threads run.
 - *numa_hit:* allocations satisfied from the preferred node.
 - *numa_miss:* allocations that fell back to a remote node (first-touch betrayal).
 - numa_foreign: allocations intended for this node but served elsewhere.

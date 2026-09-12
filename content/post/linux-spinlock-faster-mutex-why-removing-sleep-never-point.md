@@ -10,7 +10,17 @@ The arithmetic is clean, it explains the performance folklore, but the underlyin
 
 ## The Addition
 
-Here is the generic SMP path, from include/linux/spinlock_api_smp.h:
+Here is the generic SMP path, from `include/linux/spinlock_api_smp.h`:
+
+```c
+static inline void __raw_spin_lock(raw_spinlock_t *lock)
+    __acquires(lock) __no_context_analysis
+{
+    preempt_disable();
+    spin_acquire(&lock->dep_map, 0, 0, _RET_IP_);
+    LOCK_CONTENDED(lock, do_raw_spin_trylock, do_raw_spin_lock);
+}
+```
 
 Read the order, because the order is the argument. preempt_disable() runs first. Before the lock word is examined, before any spinning, before the third line does the actual acquire. With it, the kernel increments a counter that tells the scheduler this CPU is unavailable. Everything about the lock happens after that.
 
@@ -20,11 +30,26 @@ The obvious model of a spinlock is that it stops another CPU from entering the c
 
 Let's take an example. Task A takes the lock on CPU 0 and starts modifying the shared structure. The scheduler preempts it mid-write. The data is still consistent and the lock is still held. A is simply not running.
 
+```text
+CPU 0   task A   spin_lock() ──▶ modifying ──▶ [preempted]  . . . . . .
+CPU 1   task B   spin_lock() ──▶ spinning  ──▶ spinning  ──▶ spinning ..
+```
+
 On a multiprocessor machine that is a latency problem. Task B spins on a lock whose owner isn't running, and it waits for however long the scheduler takes to run A again, which is not a bounded quantity. Every cycle B burns is a cycle that could have gone to A.
 
 On a uniprocessor machine the same picture is fatal. There is no CPU 1. If A is preempted and B is scheduled in its place, B spins on a lock only A can release, and A cannot run until B stops, which B never will. Deadlock, from a lock that was correctly implemented and correctly used.
 
-Which is exactly why the uniprocessor build keeps preempt_disable() after throwing away everything else. include/linux/spinlock_api_up.h says it outright:
+Which is exactly why the uniprocessor build keeps `preempt_disable()` after throwing away everything else. `include/linux/spinlock_api_up.h` says it outright:
+
+```c
+/*
+ * In the UP-nondebug case there's no real locking going on, so the
+ * only thing we have to do is to keep the preempt counts and irq
+ * flags straight [...]
+ */
+#define __LOCK(lock, ...) \
+  do { preempt_disable(); ___LOCK_##__VA_ARGS__(lock); } while (0)
+```
 
 There is no real locking going on, and the lock still works, because on one CPU the preemption counter is the mutual exclusion. Strip a spinlock of everything that spins and preempt_disable() is what is left standing.
 
@@ -34,7 +59,12 @@ So the counter is not part of the locking algorithm. It establishes the conditio
 
 Once the lock is an execution contract rather than an algorithm, the family of spinlock variants stops looking like API clutter. Each one closes a different door, because each execution context can interrupt a different set of others.
 
-spin_lock() closes preemption: no other task takes this CPU from you. spin_lock_irq() closes hardware interrupts as well:
+`spin_lock()` closes preemption: no other task takes this CPU from you. `spin_lock_irq()` closes hardware interrupts as well:
+
+```c
+local_irq_disable();
+preempt_disable();
+```
 
 That variant exists because an interrupt handler runs on the CPU of the task it interrupted. If the handler takes a lock that task is already holding, it spins on a lock the task cannot release until the handler returns, and the handler cannot return until it gets the lock. Same CPU, same lock, no exit. spin_lock_bh() closes softirqs for the same reason one level down, where network and block-completion work runs asynchronously on your CPU and reaches your data.
 
@@ -44,15 +74,51 @@ So the subtraction has it backwards. You did not take the sleeping out of a mute
 
 Sleeping under spinlock is therefore fatal rather than slow. mutex_lock() in kernel/locking/mutex.c opens with might_sleep(), and calling it with preemption off gets you reported from kernel/sched/core.c:
 
+```c
+pr_err("BUG: sleeping function called from invalid context at %s:%d\\n",
+       file, line);
+```
+
 There is no recovery path because there is nothing to recover. The scheduler was told to stay out, and something just asked it to run.
 
 ## The Sleeping You Didn't Remove
 
-A Linux mutex does not sleep on contention, at least not first. It asks whether the current owner is running on another CPU, and if it is, it spins and waits for the handoff. The loop lives in mutex_spin_on_owner():
+A Linux mutex does not sleep on contention, at least not first. It asks whether the current owner is running on another CPU, and if it is, it spins and waits for the handoff. The loop lives in `mutex_spin_on_owner()`:
+
+```c
+while (__mutex_owner(lock) == owner) {
+    barrier();
+
+    /*
+     * Use vcpu_is_preempted to detect lock holder preemption issue.
+     */
+    if (!owner_on_cpu(owner) || need_resched()) {
+        ret = false;
+        break;
+    }
+
+    cpu_relax();
+}
+```
 
 Look at the exit condition rather than the loop. The mutex spins for exactly as long as spinning is a good idea, and the moment the owner stops running, or something more deserving wants this CPU, it stops and sleeps.
 
 The above code becomes:
+
+```text
+As long as the thread I am waiting for is still the mutex owner:
+
+    prevent compiler reordering
+
+    if owner is not running:
+        stop spinning
+
+    if scheduler wants this CPU:
+        stop spinning
+
+    otherwise:
+        politely spin
+```
 
 So the sleeping was never a fixed cost you could subtract. It was the mutex's fallback, reached only when spinning stops paying. Strip it out and you haven't removed an expense. You've removed the condition, the part that knows when to quit, and kept the spinning that was always there.
 

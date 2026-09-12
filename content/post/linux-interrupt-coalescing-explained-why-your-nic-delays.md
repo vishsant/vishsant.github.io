@@ -6,7 +6,18 @@ title = "Linux Interrupt Coalescing Explained: Why Your NIC Delays Packets on Pu
 
 If you run:
 
+```bash
+ethtool -c eth0
+```
+
 You’ll see parameters like:
+
+```text
+rx-usecs
+rx-frames
+tx-usecs
+tx-frames
+```
 
 Most of us glance at them once and move on.
 
@@ -29,6 +40,10 @@ But when **Gigabit Ethernet** became common in the late 1990s, packet rates expl
 A 1 Gbps link carrying minimum-sized Ethernet frames (64 bytes) produces ~1.48 million packets per second.
 
 In a traditional interrupt-driven network stack, each packet generates:
+
+```text
+1 packet → 1 interrupt
+```
 
 That means: ~1.48 million interrupts per second
 
@@ -60,6 +75,11 @@ Instead, it uses **DMA (Direct Memory Access)** to copy incoming packets into a 
 
 This structure is typically a **descriptor ring buffer**.
 
+```text
+NIC  → writes packet into DMA ring
+CPU  → reads packet from DMA ring
+```
+
 The NIC owns the producer side of the ring.
 
 The kernel owns the consumer side.
@@ -73,6 +93,10 @@ The interrupt handler itself does almost nothing.
 Its job is simply to acknowledge the interrupt and schedule packet processing in the **softirq** context.
 
 The actual packet processing path then:
+
+```text
+DMA ring → driver → network stack → socket buffers → application
+```
 
 Each interrupt therefore represents **a crossing between hardware and software execution contexts**.
 
@@ -88,6 +112,10 @@ This led to **interrupt throttling**, where hardware or drivers restrict the max
 
 For example:
 
+```text
+max interrupts: 10,000/sec
+```
+
 But throttling introduced a new problem.
 
 Packets arriving between interrupts accumulate in the ring buffer.
@@ -95,6 +123,11 @@ Packets arriving between interrupts accumulate in the ring buffer.
 Instead of being processed immediately, they wait until the timer fires.
 
 At high packet rates this creates bursts:
+
+```text
+Packets arrive continuously
+CPU processes them in bursts
+```
 
 Latency becomes unpredictable.
 
@@ -123,7 +156,15 @@ This changes the cost model dramatically.
 
 Instead of:
 
+```text
+1 packet → 1 interrupt
+```
+
 We get:
+
+```text
+1 interrupt → many packets
+```
 
 At high packet rates, the kernel stays in the polling loop, dramatically reducing interrupt frequency.
 
@@ -148,6 +189,12 @@ Instead of firing an interrupt immediately, the NIC waits until one of two condi
 - a timer expires
 
 Example configuration:
+
+```bash
+# Interrupt when 50 microseconds pass or 8 packets arrive
+rx-usecs 50
+rx-frames 8
+```
 
 The NIC effectively hides the first packet for 50 microseconds.
 
@@ -187,6 +234,11 @@ Goal: minimize latency
 
 Typical configuration:
 
+```text
+rx-usecs: 0
+rx-frames: 1
+```
+
 Every packet triggers an interrupt immediately.
 
 CPU overhead increases.
@@ -198,6 +250,11 @@ Latency is minimized.
 Goal: maximize throughput
 
 Typical configuration:
+
+```text
+rx-usecs: 100
+rx-frames: 64
+```
 
 Packets arrive in large batches.
 
@@ -261,9 +318,21 @@ Yet interrupt behavior directly affects network performance.
 
 You can observe interrupt counts in real time:
 
+```bash
+watch -n1 'grep eth0 /proc/interrupts'
+```
+
 Coalescing parameters can be inspected with:
 
+```bash
+ethtool -c eth0
+```
+
 And tuned with:
+
+```bash
+ethtool -C eth0 rx-usecs 50 rx-frames 8
+```
 
 But tuning should always be guided by measurement.
 

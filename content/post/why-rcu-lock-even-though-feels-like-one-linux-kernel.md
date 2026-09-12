@@ -54,11 +54,43 @@ This is the **first clue** that RCU is not a lock: **it does not enforce mutual 
 
 Look at the simplest RCU-protected data structure: a global pointer.
 
+```c
+struct foo { int a; char b; long c; };
+DEFINE_SPINLOCK(foo_mutex);
+struct foo __rcu *gbl_foo;
+
+int foo_get_a(void)
+{
+    int retval;
+    rcu_read_lock();
+    retval = rcu_dereference(gbl_foo)->a;
+    rcu_read_unlock();
+    return retval;
+}
+```
+
 A reader accesses it like this:
 
 Notice what’s missing: no lock acquisition, no atomic operations in the read path. On most architectures, *rcu_read_lock()* and *rcu_read_unlock()* compile to nothing. They’re markers, not barriers.
 
 An updater works differently:
+
+```c
+void foo_update_a(int new_a)
+{
+    struct foo *new_fp, *old_fp;
+    new_fp = kmalloc(sizeof(*new_fp), GFP_KERNEL);
+    spin_lock(&foo_mutex);
+    old_fp = rcu_dereference_protected(gbl_foo,
+                                       lockdep_is_held(&foo_mutex));
+    *new_fp = *old_fp;
+    new_fp->a = new_a;
+    rcu_assign_pointer(gbl_foo, new_fp);
+    spin_unlock(&foo_mutex);
+    synchronize_rcu();
+    kfree(old_fp);
+}
+```
 
 The updater makes a copy, modifies it, swings the pointer, then waits before freeing the old copy. Readers during the transition see either the old or new version - never a torn, inconsistent state.
 
@@ -88,6 +120,16 @@ A grace period is defined as the time during which all pre-existing RCU readers 
 
 Consider the alternative: *call_rcu()*. This asynchronous variant registers a callback to be invoked after the grace period:
 
+```c
+call_rcu(&old_fp->rcu, foo_reclaim);
+
+void foo_reclaim(struct rcu_head *rp)
+{
+    struct foo *fp = container_of(rp, struct foo, rcu);
+    kfree(fp);
+}
+```
+
 Now the updater returns immediately. The reclamation happens later, in a soft interrupt context. This is crucial for real-time systems or network stacks where blocking is unacceptable.
 
 The waiting is no longer a busy, contentious spin. It is a deferred acknowledgment that time will solve the problem. The kernel can batch these waits, spreading the cost across many updates.
@@ -114,11 +156,28 @@ Between step 4 and step 6, readers may still be accessing the old copy. And that
 
 Look at the code flow visually:
 
+```c
+new = kmalloc(...);
+*new = *old;
+new->field = updated_value;
+rcu_assign_pointer(global_ptr, new);
+synchronize_rcu();
+kfree(old);
+```
+
 This is unlike any lock.
 
 A lock guards a critical section of *code*. RCU governs the lifecycle of *data*. It ensures that data cannot vanish while it is being observed, not by blocking observers, but by keeping the data alive until observation is complete.
 
 The separation becomes even clearer with list operations. Consider deleting an element from an RCU-protected list:
+
+```c
+spin_lock(&list_lock);
+list_del_rcu(&node->list);
+spin_unlock(&list_lock);
+synchronize_rcu();
+kfree(node);
+```
 
 The *list_del_rcu()* merely unlinks the node from the list. The node itself persists in memory until the grace period elapses. Readers traversing the list may or may not see it, depending on timing, but they will never see corrupted list pointers.
 
@@ -148,6 +207,10 @@ The kernel offers *call_rcu()* for this: instead of blocking in *synchronize_rcu
 
 For the common case of just freeing memory, there’s an even simpler primitive:
 
+```c
+kfree_rcu(old_fp, rcu);
+```
+
 This single line registers the object for automatic freeing after the grace period, eliminating the need for a custom callback function. There’s also:
 
 Which might block under memory pressure but otherwise behaves similarly.
@@ -160,11 +223,33 @@ Sometimes the best way to understand a complex system is to see a simplified ver
 
 The first toy implementation uses a global reader-writer lock:
 
+```c
+static DEFINE_RWLOCK(rcu_gp_mutex);
+void rcu_read_lock(void) { read_lock(&rcu_gp_mutex); }
+void rcu_read_unlock(void) { read_unlock(&rcu_gp_mutex); }
+void synchronize_rcu(void)
+{
+    write_lock(&rcu_gp_mutex);
+    write_unlock(&rcu_gp_mutex);
+}
+```
+
 This looks suspiciously like a lock, because it is one!
 
 It demonstrates the minimal semantics: readers hold a read lock, *synchronize_rcu()* waits for all readers by acquiring a write lock. But this implementation has terrible performance and can deadlock in real kernels.
 
 The second toy implementation is more illuminating:
+
+```c
+void rcu_read_lock(void) { }
+void rcu_read_unlock(void) { }
+void synchronize_rcu(void)
+{
+    int cpu;
+    for_each_possible_cpu(cpu)
+        run_on(cpu);
+}
+```
 
 Here, the read-side primitives do absolutely nothing. *synchronize_rcu()* ensures every CPU has scheduled at least once. Since RCU read-side critical sections cannot block, a context switch guarantees they’ve completed.
 

@@ -66,6 +66,13 @@ The **memory.high** control allows the kernel to** throttle allocations instead 
 
 This gives applications a chance to shrink caches, scale down worker pools, reject requests gracefully. At the same time, **PSI (Pressure Stall Information)** measures how much time the system spends stalled on resource pressure.
 
+```console
+$ cat /proc/pressure/memory
+
+some avg10=12.4 avg60=8.1 avg300=4.0
+full avg10=0.2 avg60=0.1 avg300=0.0
+```
+
 This is effectively an early warning system.
 
 The **some** metric measures** how often at least one process was stalled waiting for memory**, while **full** measures **moments where all runnable processes were stalled simultaneously** because memory pressure became severe enough to stop forward progress entirely.
@@ -85,6 +92,10 @@ The OOM killer lives in **mm/oom_kill.c**.
 By the time it activates, the allocator is failing, reclaim has stalled, and the system is running out of forward progress. Depending on where the pressure originates, this may be a system-wide OOM event or a cgroup-local OOM.
 
 The kernel now has to free memory immediately. It evaluates every process using **oom_badness()**. In simplified form:
+
+```text
+score = memory footprint + adjustments
+```
 
 The calculation primarily considers Resident Set Size (RSS), Swap usage, Page table memory, oom_score_adj etc. The **process with the highest score becomes the victim**.
 
@@ -115,7 +126,19 @@ From the kernelâ€™s perspective, this is a rational decision. From the engineerâ
 
 Linux gives engineers several mechanisms for influencing OOM behavior. The simplest is **oom_score_adj**. Every process exposes this value through:
 
+```text
+/proc/<pid>/oom_score_adj
+```
+
 You can adjust process priority directly:
+
+```console
+# Protect postgres
+echo -900 > /proc/$(pidof postgres)/oom_score_adj
+
+# Sacrifice batch workers first
+echo 500 > /proc/$(pidof batch_worker)/oom_score_adj
+```
 
 Negative values protect a process. Positive values make it a preferred target. Containers improved this model dramatically. With cgroups, memory pressure becomes localized. If a container exceeds its memory budget, the OOM killer fires inside that cgroup instead of across the entire machine.
 

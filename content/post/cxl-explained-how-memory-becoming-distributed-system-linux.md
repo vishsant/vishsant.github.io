@@ -40,6 +40,21 @@ CXL is an **open interconnect standard built on PCIe's physical layer**. It runs
 
 These **three protocols** are **multiplexed onto** the **same physical link** **using flow-control units** called **flits**. The device negotiates which protocols it supports during initialization. The result is a single cable that can carry I/O traffic, cache-coherent device access, and memory-semantic traffic simultaneously.
 
+```text
+ [ CPU Cores ]
+                 │
+      ┌──────────┴──────────┐
+      │                     │
+[ Memory Controller ]   [ CXL Root Complex ]
+        │                       │
+        ▼                       ▼
+ [ Local DDR5 ]        [ PCIe / CXL Link ]
+   (~80 ns)                    │
+                               ▼
+                        [ CXL Memory ]
+                         (~170–250 ns)
+```
+
 The CPU issues a load instruction. If the address maps to local DDR5, the memory controller serves it at ~80ns. If the address maps to CXL-attached memory, the request travels over the PCIe/CXL link, reaches the memory expander's controller, accesses its DRAM, and returns - at roughly 170-250ns.
 
 No page fault. No driver involved. No system call. The MMU translates the virtual address to a physical address. If that physical address lives in CXL memory, the hardware routes the request over the CXL link transparently.
@@ -47,6 +62,18 @@ No page fault. No driver involved. No system call. The MMU translates the virtua
 ## How the Kernel Sees CXL Memory
 
 Linux exposes CXL memory as a **CPU-less NUMA node**.
+
+```console
+$ numactl --hardware
+
+available: 3 nodes (0-2)
+node 0 cpus: 0-15
+node 0 size: 128000 MB
+node 1 cpus: 16-31
+node 1 size: 128000 MB
+node 2 cpus:
+node 2 size: 512000 MB
+```
 
 This is a design choice with deep implications. The kernel already knows how to manage non-uniform memory. It already has distance tables, allocation policies, page migration, and tiering heuristics. **By presenting CXL memory as "just another NUMA node," the entire existing memory management infrastructure works without modification**.
 
@@ -82,6 +109,23 @@ This is the same principle behind CPU caches, swap, and page cache - but operati
 
 Type 3 memory expanders are interesting. Memory pooling is transformative.
 
+```text
+ Multiple Hosts
+  (0, 1, 2, 3 servers)
+          │
+          ▼
+     [ CXL Switch ]
+          │
+   ┌──────┼──────┐
+   ▼      ▼      ▼
+[256GB] [256GB] [256GB]
+  DRAM    DRAM    DRAM
+          │
+          ▼
+   768 GB Shared Pool
+ (allocated dynamically)
+```
+
 **CXL 2.0** introduced switching. A **CXL switch sits between multiple hosts and multiple memory** devices, **dynamically assigning memory regions to servers based on demand**.
 
 This is not shared memory in the programming sense. Each host gets exclusive access to its assigned regions. There's no concurrent access to the same bytes from multiple hosts (unless explicitly configured in CXL 3.0's sharing mode). It's more like memory that can be dynamically provisioned - virtual DIMM slots that the fabric manager assigns on demand.
@@ -95,6 +139,19 @@ CXL memory is slower than local DRAM. This is not a flaw - it's a physics constr
 Local DDR5 latency: ~80ns. CXL memory on the same socket: ~170-250ns. That's roughly 2-3x slower.
 
 For comparison, remote NUMA memory (cross-socket DDR5) is about ~150-200ns. CXL memory is in the same ballpark, sometimes slightly slower.
+
+```text
+Memory Access Latency Hierarchy
+
+  L1 Cache      ~1ns
+  L2 Cache      ~4ns
+  L3 Cache      ~12ns
+  Local DDR5    ~80ns
+  Remote NUMA   ~150ns
+  CXL Memory    ~200ns
+  CXL Pooled    ~300ns+
+  NVMe SSD      ~10,000ns
+```
 
 CXL sits between DRAM and storage - closer to remote NUMA than to disk. This positioning is deliberate. It's fast enough for memory semantics (load/store) but adds enough latency that intelligent tiering matters.
 

@@ -57,6 +57,21 @@ When systemd starts a service, it can pass already-open sockets to it—pre-boun
 
 The handoff looks like this:
 
+```c
+#include <systemd/sd-daemon.h>
+
+// How many sockets did systemd give us?
+int n = sd_listen_fds(0);
+if (n < 1) exit(1);
+
+// The first socket always starts at FD 3
+int socket_fd = SD_LISTEN_FDS_START;
+
+// Already bound. Already listening.
+// Just accept connections.
+int client = accept(socket_fd, ...);
+```
+
 systemd opens the socket. Your service just consumes it.
 
 This small shift has large consequences.
@@ -79,6 +94,12 @@ The Linux kernel exposes resource control through cgroups, but the interface is 
 
 systemd turns this into a policy layer by mapping services to cgroups automatically and allowing limits to be defined declaratively:
 
+```ini
+[Service]
+MemoryMax=2G
+CPUQuota=50%
+```
+
 These limits apply to the entire service, not just individual processes. Any child processes inherit the same constraints, which eliminates tracking issues across forks.
 
 Without systemd, achieving the same result would require manually creating and managing cgroup hierarchies.
@@ -91,7 +112,19 @@ Traditional Unix logging is text. A daemon writes a string to syslog. Syslog app
 
 journald replaces this with binary structured logging. Every log entry is stored as a set of typed key-value fields. The human-readable message is just one field among dozens. The journal automatically attaches metadata that the logging process never provided and cannot forge:
 
+```text
+_PID=1847
+_EXE=/usr/sbin/sshd
+_SYSTEMD_UNIT=sshd.service
+_SYSTEMD_CGROUP=/system.slice/sshd.service
+```
+
 Each field is indexed in a hash table. This makes queries fast without external infrastructure:
+
+```console
+# Every log entry from sshd, no parsing needed
+journalctl _SYSTEMD_UNIT=sshd.service
+```
 
 No parsing. No pipelines. Just direct queries.
 
@@ -102,6 +135,16 @@ The tradeoff is losing plain text simplicity. The benefit is gaining indexed, tr
 systemd’s components are not just co-located - they are connected. This connection happens through **D-Bus**, which **acts as the control plane for the entire system**.
 
 When you run ***systemctl start sshd.service, ***systemctl does not directly manipulate any process. It sends a **D-Bus method call to PID 1**: *StartUnit("sshd.service", "replace")*. PID 1 executes the request and emits a signal when the unit's state changes. systemctl is a thin client. All intelligence lives in PID 1.
+
+```text
+systemctl start sshd.service
+        │
+        ▼
+D-Bus method: StartUnit("sshd.service", "replace")
+        │
+        ▼
+PID 1 (systemd)
+```
 
 **Every unit is exposed as a D-Bus object**. The service **sshd.service** becomes an object at the path ***/org/freedesktop/systemd1/unit/sshd_2eservice***.
 

@@ -97,6 +97,15 @@ Leap seconds affect it.
 
 Here is what happens when you do:
 
+```c
+struct timespec start, now;
+clock_gettime(CLOCK_REALTIME, &start);
+while (!packet_received()) {
+    clock_gettime(CLOCK_REALTIME, &now);
+    if ((now.tv_sec - start.tv_sec) >= 5) break;
+}
+```
+
 Why can it go backward?
 
 NTP (Network Time Protocol) can step the clock, just like you manually rotate your watch time by adjusting the dial - to correct large errors. We'll explore exactly how this works later.
@@ -122,6 +131,14 @@ A laptop sleeps for 8 hours. CLOCK_MONOTONIC pretends nothing happened.
 
 What every engineer actually uses it for:
 
+```c
+clock_gettime(CLOCK_MONOTONIC, &start);
+while (!packet_received()) {
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    if ((now.tv_sec - start.tv_sec) >= 5) break;
+}
+```
+
 **3. CLOCK_MONOTONIC_RAW**
 
 It reads **directly from the hardware counter (TSC).**
@@ -136,6 +153,12 @@ Useful for:
 
 What breaks when you use it wrong:
 
+```c
+clock_gettime(CLOCK_MONOTONIC_RAW, &start);
+process_video_frame();
+clock_gettime(CLOCK_MONOTONIC_RAW, &end);
+```
+
 Almost never correct for application logic.
 
 **4. CLOCK_BOOTTIME**
@@ -147,6 +170,12 @@ It's always increasing. Not affected by NTP.
 Useful when uptime must include sleep. Rarely correct otherwise.
 
 When you actually need it:
+
+```c
+clock_gettime(CLOCK_BOOTTIME, &start);
+sleep(3600);
+clock_gettime(CLOCK_BOOTTIME, &now);
+```
 
 So why not always use BOOTTIME? Because it's slightly slower to read (more kernel work).
 
@@ -234,7 +263,7 @@ If your machine is 50 milliseconds ahead, NTP knows. Then it must decide how to 
 
 Two ways to correct time: Slewing and Stepping.
 
-Normally, NTP uses** slewing.** It gradually speeds up or slows down your system clock - just a tiny bit -until it matches the real time.
+Normally, NTP uses **slewing.** It gradually speeds up or slows down your system clock - just a tiny bit -until it matches the real time.
 
 From your application's perspective:
 
@@ -255,6 +284,10 @@ The kernel will not slew a clock by more than about 500 milliseconds by default.
 If the error is larger than ~500ms, NTP does something more drastic: it **steps** the clock.
 
 That means instantly jumping forward or backward to the correct time.
+
+```text
+10:00:05.000 → (clock 200ms ahead) → 10:00:04.800
+```
 
 This is the dangerous mode.
 
@@ -343,6 +376,11 @@ Their solution is called **TrueTime**.
 
 TrueTime does not return a single number. It returns an **interval**.
 
+```text
+earliest = now - uncertainty
+latest   = now + uncertainty
+```
+
 Instead of saying: "The current time is 10:00:05.000"
 
 TrueTime says: "The current time is somewhere between 10:00:04.997 and 10:00:05.003"
@@ -415,6 +453,13 @@ These tools do not trust the clock. They trust math and communication.
 ---
 
 ## The Four Clocks Cheat Sheet
+
+```text
+CLOCK_REALTIME     wall time; adjustable; logs and displays
+CLOCK_MONOTONIC    elapsed time; no backward jumps; timeouts
+CLOCK_MONOTONIC_RAW raw hardware counter; profiling
+CLOCK_BOOTTIME     elapsed time including suspend; uptime
+```
 
 ---
 

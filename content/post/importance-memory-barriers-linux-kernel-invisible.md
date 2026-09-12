@@ -40,6 +40,11 @@ With barriers.
 
 You write this code:
 
+```c
+a = 1;
+b = 2;
+```
+
 You believe you've created an order.
 
 First  becomes 1.

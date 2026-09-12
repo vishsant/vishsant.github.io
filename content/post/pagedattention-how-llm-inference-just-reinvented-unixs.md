@@ -40,7 +40,7 @@ The idea spread to Multics, Unix, Linux, and Windows. For decades, everyone trea
 
 In 2023, UC Berkeley researchers introduced PagedAttention. They published it at **SOSP**, the top operating systems conference - not ICML, not NeurIPS - because this is a systems problem.
 
-The **core idea: stop giving each sequence one big block. Break memory into small, fixed-size blocks instead. **Allocate them on demand, allow them to sit apart in physical memory, and pull them from a shared pool. Each sequence keeps a small map from logical position to physical block. Strip away the names and this is virtual memory: blocks are pages, the block table is a page table, and on-demand allocation is demand paging.
+The **core idea: stop giving each sequence one big block. Break memory into small, fixed-size blocks instead.** Allocate them on demand, allow them to sit apart in physical memory, and pull them from a shared pool. Each sequence keeps a small map from logical position to physical block. Strip away the names and this is virtual memory: blocks are pages, the block table is a page table, and on-demand allocation is demand paging.
 
 **PagedAttention also supports copy-on-write**. When many sequences share a prefix, like in beam search, they share memory and only split when one writes new data. **Same trick as fork() in Unix.**
 
@@ -54,6 +54,6 @@ So PagedAttention runs it all in software. The block table acts as a software pa
 
 ## The Hardware Catches Up
 
-New chips are closing the gap. **NVIDIA's Grace Hopper (GH200)** brings coherent CPU-GPU memory with shared page tables, faster address translation through ATS, and memory tiering across HBM and system RAM. On the software side, systems like **vAttention from Microsoft** Research push paging into the GPU memory API, splitting virtual and physical memory at the driver level.
+New chips are closing the gap. **NVIDIA's Grace Hopper (GH200)** brings coherent CPU-GPU memory with shared page tables, faster address translation through ATS, and memory tiering across HBM and system RAM. On the software side, systems like **vAttention from Microsoft Research** push paging into the GPU memory API, splitting virtual and physical memory at the driver level.
 
-The path forward looks the same as before: **hardware will absorb what software built first. **Atlas led to hardware MMUs, which led to modern CPUs. The same arc is playing out for GPUs now. Sixty years later, the problems haven't changed. Only the hardware has.
+The path forward looks the same as before: **hardware will absorb what software built first.** Atlas led to hardware MMUs, which led to modern CPUs. The same arc is playing out for GPUs now. Sixty years later, the problems haven't changed. Only the hardware has.

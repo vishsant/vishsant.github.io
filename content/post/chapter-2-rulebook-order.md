@@ -29,7 +29,16 @@ Before we write rules, let's look into some of the important tools when working 
 
 ### Step 1: Discover Your Device
 
+```bash
+lsblk
+```
+
 ### Step 2: Investigate with udevadm
+
+```bash
+udevadm info --query=all --name=/dev/sdb1
+udevadm info --query=all --name=/dev/sdb1 | grep -E "(MODEL|SERIAL|VENDOR|UUID|ID_FS)"
+```
 
 This command reveals everything udev knows about your device: manufacturer, model, serial number, filesystem type, and much more.
 
@@ -46,9 +55,24 @@ Let's solve a real problem: **"My SD card should always be accessible at /dev/my
 
 After running udevadm info, you might see:
 
+```text
+E: ID_MODEL=Extreme_Pro
+E: ID_SERIAL=SanDisk_Extreme_Pro_1234567890
+E: ID_FS_UUID=abcd-1234
+E: ID_VENDOR=SanDisk
+```
+
 ### Step 2: Create Your Rule
 
+```bash
+sudo nano /etc/udev/rules.d/99-mybackup.rules
+```
+
 Add this content:
+
+```udev
+SUBSYSTEM=="block", ATTRS{serial}=="SanDisk_Extreme_Pro_1234567890", SYMLINK+="mybackup"
+```
 
 Let's break this down word by word:
 - **SUBSYSTEM=="block"** - Only match block devices (disks, USB drives)
@@ -56,6 +80,12 @@ Let's break this down word by word:
 - **SYMLINK+="mybackup"** - Create a symbolic link called "mybackup" in /dev
 
 ### Step 3: Activate Your Rule
+
+```bash
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+ls -l /dev/mybackup
+```
 
 ## Rule Language Cheat Sheet
 

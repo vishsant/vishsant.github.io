@@ -182,6 +182,16 @@ This is not an upgrade. It is an **inversion of control**.
 
 Here is a simplified illustration of what a custom scheduler might look like (real *sched_ext* uses a specific set of BPF callbacks like *.select_cpu(), .enqueue(), .dispatch()*, not a single *pick_next_task()* function):
 
+```c
+SEC("sched_ext")
+int pick_next_task(struct task_struct *prev)
+{
+    if (is_game_thread(prev))
+        return prev->pid; /* run it now */
+    return find_fair_task();
+}
+```
+
 This captures the essence: ***you define the policy. The kernel provides the mechanism*.**
 
 Valve used this to write a custom scheduler for the Steam Deck. Their scheduler is simple. It knows which threads are game threads. When a game thread creates work, the scheduler puts it on the CPU immediately. It does not check if it is fair. It does not update a red-black tree. It just runs the game.
@@ -233,3 +243,7 @@ It places more responsibility on the engineer. You can no longer blame the "ghos
 But it also grants greater control. It allows us to better align the physics of the machine with the logic of our code.
 
 And when we tell the computer what matters, it may finally have the ears to hear us.
+
+Now, a question for you: What latency issue or performance problem have you blamed on "the scheduler" without really understanding why? Would love to hear your story.
+
+If you enjoyed this, I write about systems engineering, Linux internals, and the evolving relationship between software and hardware. Follow for more deep dives on operating system architecture.

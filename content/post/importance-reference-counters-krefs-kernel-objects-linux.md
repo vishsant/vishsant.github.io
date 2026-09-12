@@ -22,11 +22,25 @@ This is exactly where ***krefs**** *come in.
 
 You embed this reference counter inside your object:
 
+```c
+struct my_data {
+    struct kref refcount;
+};
+```
+
 That’s it.
 
 It can live anywhere in the struct.
 
 Then, right after you allocate the object:
+
+```c
+struct my_data *data;
+data = kmalloc(sizeof(*data), GFP_KERNEL);
+if (!data)
+    return -ENOMEM;
+kref_init(&data->refcount);
+```
 
 That call to ***kref_init()*** sets the reference count to 1.
 

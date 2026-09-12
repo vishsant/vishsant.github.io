@@ -20,6 +20,10 @@ This is an examination of what actually happens when you connect two programs wi
 
 Take a moment and think about what happens when you run the below command:
 
+```bash
+ls | wc -l
+```
+
 Two programs ran. One listed files. One counted lines.
 
 Somehow, without touching the disk, without any visible connection, the output of the first became the input of the second.
@@ -41,9 +45,13 @@ But learning stops exactly where it should begin.
 
 Consider a different command:
 
+```bash
+cat /dev/urandom | head -n 1
+```
+
 This also works.
 
-But  produces an infinite stream.
+But /dev/urandom produces an infinite stream.
 
 But why doesn't cat run forever?
 
@@ -69,6 +77,10 @@ That metaphor is convenient, but wrong.
 
 Consider below command:
 
+```bash
+yes | head -n 3
+```
+
 *yes* writes endlessly.
 
 *head* reads three lines and exits.
@@ -85,15 +97,29 @@ Conceptual sequence:
 5. The kernel sends SIGPIPE
 6. *yes* terminates (default signal behavior)
 
+```c
+/* fs/pipe.c in kernel: anon_pipe_write() */
+if (!pipe->readers) {
+    if (!(iocb->ki_flags & IOCB_NOSIGNAL))
+        send_sig(SIGPIPE, current, 0);
+    ret = -EPIPE;
+    goto out;
+}
+```
+
 The rule is explicit:
 
->
+> Writing to a pipe with no readers is illegal. So, the writers receive SIGPIPE
 
 Writing to a pipe with no readers is illegal. So, the writers receive SIGPIPE
 
 *yes* dies because the kernel kills it.
 
 Now reverse the roles:
+
+```bash
+sleep 3 | cat
+```
 
 *sleep* writes nothing and exits.
 
@@ -107,12 +133,31 @@ Conceptual sequence:
 1. *sleep* exits
 2. Kernel closes the pipe’s write end
 3. No writers remain
-4. *cat* calls
+4. *cat* calls *read()*
 5. Kernel returns 0 (EOF)
 
-*cat *source code reference:
+*cat* source code reference:
+
+```c
+while (true) {
+    ssize_t n_read = read(input_desc, buf, bufsize);
+    if (n_read < 0) { /* error */ }
+    if (n_read == 0) return true; /* EOF */
+    if (full_write(STDOUT_FILENO, buf, n_read) != n_read)
+        write_error();
+}
+```
 
 kernel code reference:
+
+```c
+/* fs/pipe.c : anon_pipe_read() */
+if (pipe_empty(head, tail)) {
+    if (!pipe->writers)
+        return 0; /* EOF */
+    /* otherwise: block */
+}
+```
 
 EOF is returned only when:
 - The buffer is empty
@@ -148,6 +193,11 @@ What the buffer enforces:
 
 When the buffer fills, writers block.
 
+```c
+#define pipe_full(head, tail, limit) \
+    ((head) - (tail) >= (limit))
+```
+
 This single condition decides whether a writer proceeds or sleeps.
 
 When a writer hits a full pipe, the kernel does not spin.
@@ -156,13 +206,27 @@ It puts the process to sleep.
 
 writer blocking:
 
+```c
+wait_event_interruptible_exclusive(
+    pipe->wr_wait,
+    pipe_writable(pipe)
+);
+```
+
 The process is removed from the run queue.
 
 It resumes only when a reader consumes data.
 
 When that happens:
 
-No polling.
+```c
+wake_up_interruptible_sync_poll(
+    &pipe->wr_wait,
+    EPOLLOUT | EPOLLWRNORM
+);
+```
+
+No polling
 
 Only explicit wakeups.
 
@@ -171,6 +235,10 @@ Only explicit wakeups.
 - Writer: 1 MB chunks
 - Reader: 1 byte at a time
 - Buffer: 64 KB
+
+```bash
+dd if=/dev/zero bs=1M count=100 | dd of=/dev/null bs=1
+```
 
 Here's what happens at the kernel level:
 1. **First write**: dd calls write() with 1MB of zeros
@@ -221,6 +289,11 @@ When a program opens a file, the kernel returns an integer. That integer is the 
 
 When you create a pipe, the kernel allocates a buffer and returns two file descriptors. One for reading. One for writing. These are just numbers, but they point to opposite ends of the same kernel object.
 
+```c
+int pipefd[2];
+pipe(pipefd); /* pipefd[0]: read, pipefd[1]: write */
+```
+
 **Both ends reference the same pipe object.**
 
 That’s the entire trick.
@@ -230,6 +303,10 @@ The critical part: **file descriptors are per-process**. Each process has its ow
 ## How the Shell Builds a Pipeline
 
 When you type:
+
+```bash
+ls | wc -l
+```
 
 The shell performs this exact sequence:
 1. Create pipe
@@ -244,9 +321,9 @@ The close operations matter.
 
 If the shell keeps a write descriptor open, EOF never arrives.
 
->
+> All file descriptor setup — *dup2()* and *close()* — happens *before* *exec()*.
 
-All file descriptor setup —** ** *and*  — happens *before* .
+
 
 Once exec() runs, you lose the chance to fix file descriptors.
 
@@ -254,9 +331,23 @@ Once exec() runs, you lose the chance to fix file descriptors.
 
 When the writer exits:
 
+```c
+/* fs/pipe.c : pipe_release() */
+if (file->f_mode & FMODE_WRITE)
+    pipe->writers--;
+```
+
 When writers reach zero, readers wake.
 
 When readers reach zero, buffers are freed.
+
+```c
+void free_pipe_info(struct pipe_inode_info *pipe)
+{
+    kfree(pipe->bufs);
+    kfree(pipe);
+}
+```
 
 Nothing leaks.
 

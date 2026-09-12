@@ -53,7 +53,13 @@ Same device, multiple ways to find it - none dependent on discovery order. Your 
 
 ### Exercise 1: Discover Your Devices
 
- Open a terminal and try these commands:
+Open a terminal and try these commands:
+
+```bash
+ls -la /dev/disk/by-id/
+udevadm monitor
+udevadm info /dev/sda
+```
 
 Notice how much information udev has about each device - manufacturer, model, serial number, capabilities. This rich identity is what enables the magic.
 

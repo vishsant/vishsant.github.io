@@ -12,7 +12,18 @@ That is not a hack or a special case. The driver that loaded, ftdi_sio, one of t
 
 Every OS with a USB stack faces the same problem: device drivers need to submit requests without knowing which controller silicon sits underneath. Every major OS solves it with some form of host controller abstraction - NetBSD has its own native VHCI, Windows supports virtual host controllers through frameworks such as UCX. Linux's USB/IP project was among the earliest to use the pattern for device sharing over IP.
 
-In Linux, the contract is a function pointer table called , defined at . The driver describes what it wants - read these bytes, write this configuration, check this endpoint. The contract accepts the request and delivers it. The driver never learns how. Every USB host controller in the system must fill in this table:
+In Linux, the contract is a function pointer table called `struct hc_driver`, defined at `include/linux/usb/hcd.h`. The driver describes what it wants - read these bytes, write this configuration, check this endpoint. The contract accepts the request and delivers it. The driver never learns how. Every USB host controller in the system must fill in this table:
+
+```c
+struct hc_driver {
+    ...
+    int (*urb_enqueue)(struct usb_hcd *hcd,
+                       struct urb *urb, gfp_t mem_flags);
+    int (*urb_dequeue)(struct usb_hcd *hcd,
+                       struct urb *urb, int status);
+    ...
+};
+```
 
 The pattern is identical to VFS's struct file_operations - a table descended from SunOS's vnode operation tables in 1985, that decouples the subsystem from any specific backend. The USB driver submits a request. The table routes it. Everything below the table is replaceable.
 
@@ -20,7 +31,15 @@ The pattern is identical to VFS's struct file_operations - a table descended fro
 
 Follow a USB request from the moment a driver submits it. The driver calls usb_submit_urb() at drivers/usb/core/urb.c. That function validates the request and hands it to usb_hcd_submit_urb() at drivers/usb/core/hcd.c, which resolves which host controller owns this device:
 
+```c
+struct usb_hcd *hcd = bus_to_hcd(urb->dev->bus);
+```
+
 Then it dispatches.
+
+```c
+status = hcd->driver->urb_enqueue(hcd, urb, mem_flags);
+```
 
 One function pointer call. That is the abstraction boundary. The normal USB request path eventually crosses this critical function-pointer boundary. The obvious reading is straightforward: the call lands in the host controller's enqueue function, which programs silicon, sets up a DMA transfer, and fires the USB transaction down the cable.
 
@@ -42,13 +61,50 @@ When xHCI fills in the table, urb_enqueue points at xhci_urb_enqueue(). That fun
 
 ### No Silicon
 
-In 2005, Takahiro Hirofuchi at the Nara Institute of Science and Technology published "USB/IP - a Peripheral Bus Extension for Device Sharing over IP Network". The paper demonstrated USB device sharing over IP using a virtual host controller - a complete hc_driver implementation with no hardware at all.
+In 2005, Takahiro Hirofuchi at the Nara Institute of Science and Technology published "USB/IP - a Peripheral Bus Extension for Device Sharing over IP Network". The paper demonstrated USB device sharing over IP using a virtual host controller - a complete `hc_driver` implementation with no hardware at all.
 
-vhci_hc_driver, defined at drivers/usb/usbip/vhci_hcd.c, fills in the same table.
+`vhci_hc_driver`, defined at `drivers/usb/usbip/vhci_hcd.c`, fills in the same table.
 
-No physical IRQ line. No DMA setup. No register access. This is a host controller that controls no hardware. When a request arrives at vhci_urb_enqueue, it does not touch a register. It calls vhci_tx_urb(), which does two things:
+No physical IRQ line. No DMA setup. No register access. This is a host controller that controls no hardware. When a request arrives at vhci_urb_enqueue, it does not touch a register. It calls `vhci_tx_urb()`, which does two things:
+
+```c
+list_add_tail(&priv->list, &vdev->priv_tx);
+wake_up(&vdev->waitq_tx);
+```
 
 The request goes onto a linked list. A kernel thread wakes up, serializes the request into a USB/IP network message, and writes it to a TCP socket - a connection to the Windows machine where the physical device is actually plugged in. On the Windows side, usbipd receives the request and passes it to the USB/IP stub driver, which turns it back into a real USB request for the Windows USB stack and controller. The response travels back through the same path: Windows USB stack → usbipd → TCP → VHCI. The Linux driver that originally submitted the request then receives the completion callback it would have received from a locally attached device.
+
+```text
+Driver
+  │
+  ▼
+usb_submit_urb()
+  │
+  ▼
+usb_hcd_submit_urb()
+  │
+  ▼
+┌─────────────────────────┐
+│ hcd->driver->            │
+│    urb_enqueue()         │
+└────────────┬────────────┘
+             │
+       ┌─────┴─────┐
+       ▼           ▼
+      xHCI        VHCI
+       │           │
+       ▼           ▼
+   hardware     TCP socket
+       │           │
+       ▼           ▼
+     device      usbipd
+                    │
+                    ▼
+             Windows USB stack
+                    │
+                    ▼
+              USB device
+```
 
 USB/IP began as Hirofuchi's 2003–2005 work on sharing USB devices over IP. It eventually became part of the Linux kernel, and the same VHCI architecture is what usbipd-win uses to attach Windows USB devices into WSL2 today.
 

@@ -34,6 +34,10 @@ So, beautiful people, welcome to an article series that dives deeper into the el
 
 The logical rules on which udev works. [Read more.](/post/chapter-2-rulebook-order/)
 
-## Chapter 3: The Information Flow
+### Chapter 3: The Information Flow
 
-How the kernel and user space work together to handle a device. Read more.
+How the kernel and user space work together to handle a device. [Read more.](/post/chapter-3-information-flow/)
+
+So, that's the end of this mini series on udev.
+
+Let me know if something else needs to be covered as a series where you can get all the required info in one place.

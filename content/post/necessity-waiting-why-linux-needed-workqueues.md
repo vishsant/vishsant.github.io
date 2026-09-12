@@ -68,6 +68,18 @@ A developer could wrap a function in a ***work_struct*** and queue it.
 
 The kernel would execute it later, in a dedicated thread context where sleeping was allowed.
 
+```c
+struct work_struct my_work;
+
+void my_deferred_function(struct work_struct *work)
+{
+    /* Safe to sleep, lock, and wait here */
+}
+
+INIT_WORK(&my_work, my_deferred_function);
+schedule_work(&my_work);
+```
+
 Workqueues offered two models: a single-threaded queue for ordered execution, or a per-CPU, multi-threaded queue where each CPU got a dedicated worker thread for that queue.
 
 For its time, it was a victory.
@@ -119,6 +131,12 @@ Each pool doesn’t just hold workers; it listens to them.
 It tracks which workers are running. When a worker executes a piece of code that blocks - on a lock, on I/O, on memory - the pool notices. If work is still pending, it immediately wakes or creates another worker. The goal is to keep the CPU busy, to never let a sleeping worker stall progress.
 
 When the work drains, workers become idle. The pool lets them linger briefly, a cache for anticipated demand. If the quiet persists, they are terminated. The system breathes in and out, expanding concurrency under load and contracting to a minimal footprint at rest.
+
+```text
+interrupt → bottom half → tasklet → thread
+                         ↓
+              workqueue worker pool
+```
 
 The developer who calls *schedule_work()* is abstracted from this symphony. They declare the what.
 

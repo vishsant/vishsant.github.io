@@ -38,6 +38,16 @@ This offset lies just beyond the plaintext output - inside the authentication ta
 
 The operation looks like:
 
+```c
+scatterwalk_map_and_copy(
+    &seqno_lo,
+    dst,
+    assoclen + cryptlen,
+    4,
+    1
+);
+```
+
 This write happens before authentication is verified, and it executes even if the decryption ultimately fails. The overwritten bytes are never restored.
 
 That detail is what makes this bug exploitable.
@@ -45,6 +55,19 @@ That detail is what makes this bug exploitable.
 ## Opening the Door - AF_ALG
 
 In 2015, the kernel introduced **AF_ALG**, a **socket interface that exposes crypto operations to userspace**. Any unprivileged user could now trigger authencesn and other kernel crypto templates directly from a socket.
+
+```c
+// Userspace code — no privileges needed
+int fd = socket(AF_ALG, SOCK_SEQPACKET, 0);
+
+struct sockaddr_alg sa = {
+    .salg_family = AF_ALG,
+    .salg_type   = "aead",
+    .salg_name   = "authencesn(hmac(sha256),cbc(aes))"
+};
+
+bind(fd, (struct sockaddr *)&sa, sizeof(sa));
+```
 
 This made authencesn reachable from outside the kernel.
 
@@ -55,6 +78,10 @@ So even though the bug was reachable, it couldn’t affect anything sensitive.
 ## The Optimization - Changing the Target
 
 In 2017, an optimization changed AEAD processing to **work in-place**. Instead of keeping source and destination separate, the kernel made them share the same scatterlist:
+
+```c
+req->src == req->dst
+```
 
 To support this, the tag pages from the TX scatterlist - which hold the authentication tag data - were chained onto the end of the RX scatterlist using sg_chain(). These tag pages are the pages delivered via splice(), which means they are references to the file's page cache, not copies.
 
@@ -117,9 +144,10 @@ So even though the same write inside authencesn still occurs at dst[assoclen + c
 ## The Lesson Taught by the Bug
 
 This vulnerability was not introduced by a single mistake. The bug emerged from the interaction of three independent decisions:
-1. A scratch write that was safe in isolation
-2. A userspace interface that expanded access
-3. An optimization that changed memory layout
+
+- A scratch write that was safe in isolation
+- A userspace interface that expanded access
+- An optimization that changed memory layout
 
 Each decision made sense on its own. Together, they created an unexpected path to modify the page cache.
 

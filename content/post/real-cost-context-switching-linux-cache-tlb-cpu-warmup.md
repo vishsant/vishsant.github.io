@@ -82,6 +82,22 @@ The kernel completes the context switch in 1-2 microseconds. The registers are s
 
 But the process that resumes may be running on a CPU where much of the microarchitectural state is less useful for its workload:
 
+```text
+context_switch()
+  ↓
+registers saved and restored       # ~1-2 μs (direct, measured cost)
+  ↓
+TLB state less useful               # translations may need rebuilding
+  ↓
+cache colder                        # working set may not be resident
+  ↓
+branch predictor less trained       # prediction accuracy may be reduced
+  ↓
+prefetcher colder                   # useful patterns not established
+  ↓
+warmup period                       # workload-dependent recovery
+```
+
 The key insight is that these costs do not appear in any standard tool as "context switch overhead." The degraded execution after a switch counts as normal CPU time. Your process is running. It is just running with a worse cache hit rate, more TLB misses, and more branch mispredictions than it would have if it had not been interrupted.
 
 This is why latency-sensitive systems - trading platforms, game servers, real-time audio, network packet processors - go to lengths to minimize context switches and core migrations. Not because the switch itself is expensive. Because the effective cost extends well beyond the switch, in ways that depend on the workload and are invisible to standard tools.
@@ -89,6 +105,24 @@ This is why latency-sensitive systems - trading platforms, game servers, real-ti
 ## The Tools
 
 Making the effective cost visible requires looking at hardware performance counters.
+
+```bash
+# Count context switches alongside cache and TLB misses
+perf stat -e context-switches,cache-misses,L1-dcache-load-misses,\\
+  dTLB-load-misses,branch-misses -p <PID>
+
+# Sample cache misses to find hot spots
+perf record -e cache-misses -c 1000 -p <PID>
+perf report
+
+# Check voluntary vs involuntary switches
+ grep ctxt /proc/<PID>/status
+ voluntary_ctxt_switches:     4521
+ nonvoluntary_ctxt_switches:  891
+
+# Pin a process to eliminate cross-core migration
+taskset -c 3 ./my_application
+```
 
 Voluntary switches happen when your process blocks - waiting for I/O, sleeping on a mutex. Involuntary switches happen when the scheduler preempts your process because its time slice expired or a higher-priority task arrived. Both carry the same potential for microarchitectural disruption. But involuntary switches are the ones you did not ask for, and they are often the ones worth investigating first.
 

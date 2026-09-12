@@ -12,7 +12,19 @@ It is also wrong in almost every detail. rm does not erase data. It does not rec
 
 Start with what rm actually calls. It is not some delete_file() syscall. It is unlink(), and the name is the whole story: it removes a link, not a file. A filename, in Linux, is just a link - a directory entry pointing at an inode, the real object that owns the data. A single inode can have many names (that is what a hard link is), and the inode keeps a count of them.
 
-When you unlink() a name, the filesystem's unlink operation decrements that count. Here is the entire mechanism, from fs/inode.c:
+When you unlink() a name, the filesystem's unlink operation decrements that count. Here is the entire mechanism, from `fs/inode.c`:
+
+```c
+/* fs/inode.c — drop_nlink() */
+
+void drop_nlink(struct inode *inode)
+{
+    WARN_ON(inode->i_nlink == 0);
+    inode->__i_nlink--;
+    if (!inode->i_nlink)
+        atomic_long_inc(&inode->i_sb->s_remove_count);
+}
+```
 
 That is the "delete." One field, i_nlink, decremented by one. If the file had two names, it now has one, and nothing else happens at all. The data is untouched and still reachable by the other name. rm operates on names, and only names. It has no idea what "the file" is.
 
@@ -22,9 +34,18 @@ So when does the data get freed? This is the part nobody is taught, and it is th
 
 The first is i_nlink - how many names point at it, on disk. That is the one unlink() touches. The second is i_count - the inode's in-memory reference count. It counts every live in-kernel reference to the inode, but for a file you are trying to delete, the references that matter are the open handles: every process that has the file open is keeping i_count above zero. The kernel will not free the data until both counts reach zero - no names left, and nothing still holding it open. Removing the last name is necessary, but it is not sufficient.
 
-When a process closes a file, the close path eventually reaches iput(), which drops one in-memory reference. Only when that reference count hits zero does the kernel even ask whether to free the inode - and the test it applies is this:
+When a process closes a file, the close path eventually reaches `iput()`, which drops one in-memory reference. Only when that reference count hits zero does the kernel even ask whether to free the inode - and the test it applies is this:
 
-!inode->i_nlink - now the name count matters. If there are no names left, the inode is droppable, and iput_final() proceeds to evict() it, which is where the data blocks finally return to the filesystem. But iput() only ran in the first place because the last open handle was released. Two gates, in sequence: the last name goes, then the last handle goes, and only then does the data die.
+```c
+/* include/linux/fs.h — inode_generic_drop() */
+
+static inline int inode_generic_drop(struct inode *inode)
+{
+    return !inode->i_nlink || inode_unhashed(inode);
+}
+```
+
+`!inode->i_nlink - now the name count matters. If there are no names left, the inode is droppable, and iput_final() proceeds to evict() it, which is where the data blocks finally return to the filesystem. But iput() only ran in the first place because the last open handle was released. Two gates, in sequence: the last name goes, then the last handle goes, and only then does the data die.
 
 rm only ever touches the first gate. The second one is held by whoever has the file open, and that might be a process that does not plan to close it any time soon.
 
@@ -32,7 +53,23 @@ rm only ever touches the first gate. The second one is held by whoever has the f
 
 This is where the production mystery comes from. Watch what happens when you delete a file that something still has open. I created a 50MB file, opened it in one process, then deleted it by name:
 
+```console
+$ dd if=/dev/zero of=/tmp/ghostfile bs=1M count=50
+$ sleep 60 < /tmp/ghostfile &      # a process holding it open
+$ rm /tmp/ghostfile
+$ ls /tmp/ghostfile
+ls: cannot access '/tmp/ghostfile': No such file or directory
+```
+
 By name, the file is gone. ls can't find it, no other process can open it, it has no path anymore. And yet:
+
+```console
+$ ls -l /proc/*/fd/0 | grep ghost
+lr-x------ ... /proc/22532/fd/0 -> '/tmp/ghostfile (deleted)'
+
+$ wc -c < /proc/22532/fd/0
+52428800
+```
 
 There it is - (deleted), and still 52,428,800 bytes, every one of them readable. The name count hit zero, but the open handle kept the inode alive, so the data never went anywhere. The file has become a ghost: unreachable by name, fully present on disk. This is exactly why df (which counts real allocated blocks) and du (which sums the sizes of files it can reach by name) will flatly disagree on a busy server. df sees the ghost's blocks; du cannot, because the ghost has no name to walk to.
 
@@ -46,7 +83,48 @@ So what does evict() actually do to the data? Two things, to two different copie
 
 But look closely at what evict() does not do: it never overwrites those blocks. It marks them free; it does not wipe the bytes sitting in them. This is the whole reason rm is not a secure erase, and why undelete tools can sometimes recover a file long after it is "gone" - the data was abandoned, not destroyed. It stays perfectly legible in those blocks until something else allocates them and writes over the top. Even at the final stage, the kernel does not erase your file. It just stops protecting the ground it was standing on, and walks away.
 
-One line worth drawing explicitly, because it is exactly where people argue past each other. Everything up to this point -  removing a name, the link count, and the rule that the data survives until both the name count and the open-handle count reach zero lives in the VFS layer, and it is the POSIX contract. Every compliant filesystem inherits it; an open file outliving its own  is guaranteed, not optional. What each filesystem decides for* *itself is the reclamation step inside : whether freed blocks are returned immediately or lazily, and whether they are scrubbed or merely marked available.  is the worked example here , . btrfs, XFS, or a log-structured filesystem differ in those mechanics. But none of them change the model this article is about:  removes a name, and the data is freed only when the last reference - name or handle.
+One line worth drawing explicitly, because it is exactly where people argue past each other. Everything up to this point -  removing a name, the link count, and the rule that the data survives until both the name count and the open-handle count reach zero lives in the VFS layer, and it is the POSIX contract. Every compliant filesystem inherits it; an open file outliving its own  is guaranteed, not optional. What each filesystem decides for* *itself is the reclamation step inside : whether freed blocks are returned immediately or lazily, and whether they are scrubbed or merely marked available.  is the worked example here , . btrfs, XFS, or a log-structured filesystem differ in those mechanics. But none of them change the model this article is about: `rm` removes a name, and the data is freed only when the last reference - name or handle.
+
+```text
+// the user types "delete this file"
+rm bigfile
+│
+▼
+// remove one name
+unlink() -> drop_nlink()
+│
+▼
+// if the name count hits zero
+i_nlink: 1 -> 0
+│
+▼
+// the file vanishes from the directory
+// the NAME is gone (but data lives)
+│
+▼
+// THE GAP (seconds, or days)
+...file still open by some process...
+│
+▼
+// the last open handle closes
+last close() -> __fput() -> iput()
+│
+▼
+// the final in-memory reference drops
+i_count: 1 -> 0
+│
+▼
+// both conditions are now true
+!i_nlink && !i_count
+│
+▼
+// the inode can finally be destroyed
+evict()
+│
+▼
+// the blocks return to the filesystem
+// the data is finally freed
+```
 
 Two reference counts, two gates, and the data survives until both are zero. The deletion you typed was only ever the first half.
 

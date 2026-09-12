@@ -52,25 +52,50 @@ Now the system remembers this device forever, even after it's unplugged.
 
 Everything udev knows comes from /sys/ - a virtual filesystem that exposes the kernel's device information as readable files and directories.
 
+```bash
+ls /sys/class/block/
+cat /sys/class/block/sdb/device/vendor
+cat /sys/class/block/sdb/device/model
+cat /sys/class/block/sdb/size
+```
+
 Each file in /sys/ represents a piece of device information that udev can read to make decisions. It's like every device carries its own resume, and udev is the hiring manager reading it.
 
 ### Practical Applications: Become a udev Detective
 
 **Exercise 1: Watch the Kernel Perspective**
 
+```bash
+sudo udevadm monitor --kernel --subsystem-match=block
+```
+
 *This shows raw kernel events—the "some block device plugged in!" signal when a pendrive is inserted to the usb port.*
 
 **Exercise 2: Watch the Udev Perspective**
 
+```bash
+sudo udevadm monitor --udev --subsystem-match=block
+```
+
 *This shows udev's interpretation - the "this is a SanDisk USB drive" level*
 
 **Exercise 3: Watch the Filesystem Perspective**
+
+```bash
+watch -n 1 'ls -la /dev/disk/by-id/'
+```
 
 *This shows the final result—the created device nodes*
 
 Now plug in a USB drive and watch the beautiful choreography unfold!
 
 **Exercise 4: Simulate Events for Testing**
+
+```bash
+sudo udevadm trigger --action=change --name-match=/dev/sdb
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
 
 ### Real-World Debugging Scenario
 

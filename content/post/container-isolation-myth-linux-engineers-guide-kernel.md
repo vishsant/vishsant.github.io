@@ -68,13 +68,29 @@ One kernel. One scheduler. One memory allocator. One attack surface.
 
 ## The Kernel Truth
 
-Every process in Linux has a *task_struct (See include/linux/sched.h)*.
+Every process in Linux has a `task_struct` (see `include/linux/sched.h`).
 
 Inside it:
 
-***nsproxy*** does the trick.
+```c
+struct task_struct {
+    struct nsproxy *nsproxy;
+};
+```
+
+`nsproxy` does the trick.
 
 It’s a struct containing pointers:
+
+```c
+struct nsproxy {
+    struct uts_namespace *uts_ns;
+    struct ipc_namespace *ipc_ns;
+    struct mnt_namespace *mnt_ns;
+    struct pid_namespace *pid_ns_for_children;
+    struct net *net_ns;
+};
+```
 
 Think of a namespace object as a **table of mappings**.
 
@@ -87,6 +103,17 @@ When you start a container, the container runtime creates a new set of namespace
 But all of them live:
 
 In the same kernel memory. On the same heap. Under the same MMU.
+
+```text
+Host kernel memory
+  task 1000 → nsproxy A → pid/net/uts namespaces A
+  task 2000 → nsproxy B → pid/net/uts namespaces B
+
+Container A: PID 1, 10.0.1.2
+Container B: PID 1, 10.0.2.2
+
+Host view: both tasks and both network paths
+```
 
 The hardware has no concept of namespaces.
 
@@ -284,3 +311,9 @@ That illusion lasted until I mounted a host directory into a container for “co
 The moment I edited a file inside the container and saw it change on the host, I realized:
 
 Different namespace. Same filesystem.
+
+What was yours?
+
+Would love to hear your story.
+
+If you enjoyed this, I write about systems engineering, Linux internals, and the evolving relationship between software and hardware. Follow for more deep dives on operating system architecture.

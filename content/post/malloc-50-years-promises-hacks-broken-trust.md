@@ -26,12 +26,21 @@ A story of promises made… and deferred.
 
 In early Unix systems, memory was simple.
 
+```c
+void *p = malloc(1024);
+```
+
 Your process had a data segment. At the top sat a boundary called the **program break**.
 
 If you wanted more memory, you moved that boundary upward.
 
 That was it.
-- break() in Version 1 Unix (1971)
+
+```text
+break() in Version 1 Unix (1971)
+brk() and sbrk() by Version 6 (1975)
+```
+
 - brk() and sbrk() by Version 6 (1975)
 
 No page tables. No virtual memory. No abstraction.
@@ -238,7 +247,22 @@ But now the lies are verified.
 
 It all begins with one line:
 
+```c
+void *p = malloc(1024);
+```
+
 And unfolds like this:
+
+```text
+1971 : sbrk()                 → real RAM
+1980s: virtual memory         → addresses (physical later)
+1987 : dlmalloc               → fragmentation tamed
+2002 : ptmalloc               → threads get arenas
+2005+: tcmalloc/jemalloc      → speed vs efficiency
+2010s: NUMA                   → locality matters
+2015 : Rust                   → ownership replaces malloc
+2019+: MTE                    → hardware enforces honesty
+```
 
 Each step solved the previous problem.
 
@@ -269,3 +293,11 @@ Every generation thought they'd solved it.
 We think we're different. We're not.
 
 So what problem are we creating for the next decade?
+
+My guess: security latency trade-offs in memory tagging.
+
+What's yours?
+
+Drop it in the comments. I read every one.
+
+If you enjoyed this, I write about systems engineering, Linux internals, and the evolving relationship between software and hardware. Follow for more deep dives on operating system architecture.

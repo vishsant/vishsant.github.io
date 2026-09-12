@@ -18,6 +18,17 @@ When userspace code calls a syscall, the CPU performs a privilege level transiti
 
 The transition is not free. The CPU saves the current register state, switches the stack pointer to the kernel stack, loads the appropriate privilege level, validates the syscall number, dispatches to the handler, runs the handler, prepares the return value, and reverses the transition to hand control back to your code.
 
+```text
+User Space (ring 3)
+    ↓ syscall
+Kernel Space (ring 0)
+    → validate
+    → dispatch
+    → execute I/O
+    ↓ sysret
+User Space (ring 3)
+```
+
 On a modern CPU, this round trip typically costs on the order of hundreds of nanoseconds, depending on hardware, cache state, and whether kernel page table isolation (KPTI) or similar mitigations are active. In isolation, that is nothing. At scale, it is everything.
 
 A web server handling 100,000 requests per second, issuing 10 I/O operations per request, makes on the order of one million syscall boundary crossings per second - purely to submit I/O it already decided to do. (Not every syscall is an I/O submission; accept, epoll_wait, and others factor in too - but the order of magnitude holds.) The submissions are not the bottleneck. The boundary crossings are.
@@ -41,6 +52,27 @@ io_uring is the answer to the second question.
 **io_uring** is built around** two ring buffers shared between userspace and kernel**: the **submission queue (SQ)** and the **completion queue (CQ)**.
 
 When you call **io_uring_setup()**, the **kernel allocates both rings and maps them into your process's address space via mmap().** From that point, both you and the kernel can read and write the rings directly - no data is copied between them, because the same physical memory is visible to both.
+
+```text
+Userspace process
+
+Submission Queue (SQ)
+    → [SQE][SQE][SQE]
+    → you write requests here
+
+    ↓ shared memory (mmap)
+
+Completion Queue (CQ)
+    → [CQE][CQE][CQE]
+    → you read results here
+
+    ↓
+
+Kernel
+    → read SQEs
+    → execute I/O
+    → write CQEs
+```
 
 You describe I/O work by filling in a Submission Queue Entry (SQE) - a 64-byte structure that contains the operation type (read, write, accept, connect, fsync, and dozens more), the file descriptor, the buffer address, the length, and a user-supplied tag for correlation. You place the SQE into the ring and advance the tail pointer.
 

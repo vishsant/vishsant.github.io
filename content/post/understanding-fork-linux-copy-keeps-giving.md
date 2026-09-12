@@ -52,6 +52,17 @@ The child receives the signal mask. Any signals the parent had blocked at the mo
 
 The child receives the environment variables. The current working directory. The umask. The resource limits. The set of mounted filesystems visible through the namespace. The effective user ID and group ID. The nice value.
 
+```text
+Parent state at fork(): memory → heap, stack, globals, code
+fds → stdin, stdout, stderr, socket, log
+signals → inherited dispositions and mask
+cwd → /srv/app
+```
+
+```c
+pid_t pid = fork(); /* 0 in child, child's PID in parent */
+```
+
 The **child does not receive the parent's threads**. Only the calling thread survives in the child. The other threads, if any existed, are gone. Their locks, their state, their half-completed work are all gone too. The child wakes up as a single-threaded process holding the memory of a multithreaded one.
 
 This detail causes more production bugs than almost any other behavior in the function.
@@ -64,7 +75,14 @@ Copy-on-write is the mechanism that makes fork() fast and the reason it is misun
 
 When the child process comes into existence, the kernel does not duplicate the parent's physical memory pages. Instead, it marks every writable page in both processes as read-only and shared. Pages that were already read-only, such as the program's code segment, remain shared without any change. The parent and child point to the same physical memory. Both see the same bytes. But the kernel watches.
 
-The moment either process writes to a page, the kernel intercepts the write. It copies that page, gives the writing process its own private copy, marks it writable, and allows the write to proceed. The other process continues with its unchanged copy.
+The moment either process writes to a page, the kernel intercepts the write.
+
+```text
+Before: parent and child → physical page A (shared)
+After child writes: parent → page A; child → page B (private)
+```
+
+It copies that page, gives the writing process its own private copy, marks it writable, and allows the write to proceed. The other process continues with its unchanged copy.
 
 This is the lie that saves memory. The child appears to have a full copy of the parent's address space. It costs almost nothing to create. The cost only lands when a write happens.
 
@@ -89,6 +107,12 @@ The correct approach in most server architectures is to close inherited file des
 But this requires deliberate action. The default behavior is inheritance. And inheritance, for file descriptors, means shared mutable state between processes that are supposed to be independent.
 
 Network sockets behave the same way. A listening socket inherited by a child can accept connections. Two children accepting connections from the same listening socket leads to surprising behavior. Both see the connection request. Only one should handle it. Which one? The answer depends on timing and kernel scheduling, not on the programmer's intent.
+
+```text
+Parent fd[4] ─┐
+              ├─→ file description: offset=1000
+Child  fd[4] ─┘
+```
 
 The file descriptor table looks like a detail. In practice, it is one of the most consequential things that fork transfers.
 
@@ -126,7 +150,11 @@ The safe pattern is strict: **call fork() before any threads are created, or cal
 
 ## The Workaround
 
-The engineers who designed POSIX knew about the multithreaded fork problem. They added a function called** *pthread_atfork()***.
+The engineers who designed POSIX knew about the multithreaded fork problem. They added a function called **pthread_atfork()**.
+
+```c
+pthread_atfork(prepare, parent, child);
+```
 
 The function registers **three handlers**: one that runs before the fork, one that runs in the parent after the fork, and one that runs in the child after the fork. The intent was to let library authors acquire their locks before the fork and release them after, preventing the child from inheriting a locked mutex whose owner has evaporated.
 
@@ -164,7 +192,7 @@ The framework for thinking about this is specific:
 
 **What fork() copies and why it matters:**
 
-**First: **virtual memory. Visible, manageable, copy-on-write deferred. Dangerous when the child writes to large inherited heaps.
+**First:** virtual memory. Visible, manageable, copy-on-write deferred. Dangerous when the child writes to large inherited heaps.
 
 **Second:** file descriptors. Shared, not duplicated. A shared file offset and a shared socket create contention between parent and child.
 
@@ -174,7 +202,7 @@ The framework for thinking about this is specific:
 
 **Fourth:** open directory streams. The child inherits the parent's open directory handles. The underlying file descriptor references the same kernel object, but the userspace buffer that holds the directory stream state - including the read position - is subject to copy-on-write. On Linux, glibc places the DIR struct in heap memory, so each process gets its own copy after fork. The kernel file offset is shared, but the buffered position diverges independently. POSIX only guarantees that positioning may be shared; portability assumptions here are unsafe.
 
-**Fifth: **memory-mapped files. The mapping is inherited. If the mapping was created with MAP_SHARED, writes from either process are visible to both and to the underlying file. The shared mutable state is real.
+**Fifth:** memory-mapped files. The mapping is inherited. If the mapping was created with MAP_SHARED, writes from either process are visible to both and to the underlying file. The shared mutable state is real.
 
 **Sixth:** thread-local storage from dead threads. The storage exists in virtual memory. The child inherits those pages. The values are stale. Any code that reads them after fork receives data from a thread that no longer exists.
 

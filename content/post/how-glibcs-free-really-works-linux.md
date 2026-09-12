@@ -12,7 +12,52 @@ Start with the belief, because it is almost reasonable. You asked the allocator 
 
 The measurement destroys it. I allocated 200,000 small objects, wrote to every one so the pages were truly resident, then freed the first 199,999 objects while intentionally keeping the final allocation - the highest-address chunk, alive.
 
+```c
+/* number of small objects */
+const size_t N  = 200000;
+/* small to stay on the heap, not mmap */
+const size_t SZ = 512;
+
+void **p = malloc(N * sizeof *p);
+if (!p) {
+    perror("malloc (index)");
+    return 1;
+}
+
+for (size_t i = 0; i < N; i++) {
+    p[i] = malloc(SZ);
+    if (!p[i]) {
+        perror("malloc (chunk)");
+        return 1;
+    }
+    memset(p[i], 'x', SZ);
+}
+printf("after 200k mallocs  RSS = %6ld kB\\n", rss_kb());
+
+for (size_t i = 0; i < N - 1; i++)
+    free(p[i]);
+printf("after freeing 199,999  RSS = %6ld kB\\n", rss_kb());
+
+malloc_trim(0);
+printf("after malloc_trim(0)  RSS = %6ld kB\\n", rss_kb());
+
+/* Clean up the last live chunk + the index. */
+free(p[N - 1]);
+free(p);
+return 0;
+```
+
 The result:
+
+```text
+after 200k mallocs        RSS = 106116 kB
+# 99.9% freed. unchanged.
+after freeing 199,999     RSS = 106312 kB
+# now it collapses
+after malloc_trim(0)      RSS = 3196  kB
+```
+
+Freeing 99.9% of the heap returned nothing.
 
 Freeing 99.9% of the heap returned nothing. RSS, the amount of physical RAM the kernel currently counts as backing your process, reported in /proc/PID/status, did not fall. It rose slightly, from the accounting glibc did to track the free chunks. The memory only came back when I explicitly asked for it with malloc_trim. To understand why, you have to follow the freed chunk to where it actually goes.
 
@@ -26,7 +71,28 @@ The consequence is that free is a local operation. It moves a chunk from "in use
 
 ### The Wilderness
 
-There is one region glibc can easily give back to the kernel: the top of the heap. The heap grows upward as your program allocates memory, so the highest addresses are the newest ones. The unused space at that end is called the top chunk, historically the wilderness. If that free space becomes large enough, glibc can shrink the heap and return those pages to the kernel. The function that does this is systrim() in malloc/malloc.c:
+There is one region glibc can easily give back to the kernel: the top of the heap. The heap grows upward as your program allocates memory, so the highest addresses are the newest ones. The unused space at that end is called the top chunk, historically the wilderness. If that free space becomes large enough, glibc can shrink the heap and return those pages to the kernel. The function that does this is `systrim()` in `malloc/malloc.c`:
+
+```c
+/*
+   systrim is an inverse of sorts to sysmalloc.  It gives memory back
+   to the system (via negative arguments to sbrk) if there is unused
+   memory at the `high' end of the malloc pool. It is called
+   automatically by free() when top space exceeds the trim
+   threshold. It is also called by the public malloc_trim routine.
+ */
+static int systrim (size_t pad, mstate av)
+{
+  long top_size = chunksize (av->top);
+  long top_area = top_size - MINSIZE - 1;
+
+  /* nothing at the top to give back */
+  if (top_area <= pad)
+    return 0;
+  ...
+  /* negative sbrk: shrink the heap */
+  new_brk = (char *) (MORECORE (-extra));
+```
 
 Read that comment carefully because it explains the entire mechanism. Memory goes back to the operating system only when there is unused space at the high end of the heap, and only after that free space exceeds a configurable threshold. By default, glibc starts trimming when the top chunk grows beyond 128 KB, though that threshold can be tuned with M_TRIM_THRESHOLD. The mallopt(3) man page states it plainly: free() releases memory to the system only "when the amount of contiguous free memory at the top of the heap grows sufficiently large."
 
@@ -48,8 +114,8 @@ malloc_trim(0) escapes this trap because it does more than shrink the heap. Mode
 
 There is one important exception to everything you've just read.
 
-Large allocations often bypass the heap entirely. When a request exceeds glibc's  (128 KB initially), glibc allocates it with a dedicated  instead of carving space from the heap. That allocation lives in its own mapping, completely independent of the heap. When you free one of these large blocks, glibc simply calls . The mapping disappears immediately, and the kernel reclaims the pages. No top chunk. No trimming. No fragmentation trap.
+Large allocations often bypass the heap entirely. When a request exceeds glibc's `M_MMAP_THRESHOLD` (128 KB initially), glibc allocates it with a dedicated `mmap()` instead of carving space from the heap. That allocation lives in its own mapping, completely independent of the heap. When you free one of these large blocks, glibc simply calls `munmap()`. The mapping disappears immediately, and the kernel reclaims the pages. No top chunk. No trimming. No fragmentation trap.
 
-That exception is narrower than it first appears. The  threshold is dynamic: as a program repeatedly allocates and frees large blocks, glibc raises the threshold up to 32 MB on 64-bit systems. Over time, allocations that once received their own mappings may instead come from the heap, where all the rules you've just learned apply again.
+That exception is narrower than it first appears. The `mmap` threshold is dynamic: as a program repeatedly allocates and frees large blocks, glibc raises the threshold up to 32 MB on 64-bit systems. Over time, allocations that once received their own mappings may instead come from the heap, where all the rules you've just learned apply again.
 
- releases memory to the allocator. Returning memory to the operating system is a separate decision, driven by the allocator's policy rather than your call to .
+`free()` releases memory to the allocator. Returning memory to the operating system is a separate decision, driven by the allocator's policy rather than your call to `free()`.

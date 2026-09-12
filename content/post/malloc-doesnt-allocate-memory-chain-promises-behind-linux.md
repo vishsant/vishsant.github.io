@@ -6,6 +6,10 @@ title = "malloc() Doesn’t Allocate Memory: The Chain of Promises Behind Linux 
 
 There is a line of code that appears in almost every C program:
 
+```c
+void *p = malloc(1024);
+```
+
 Every programmer learns the same idea:
 
 malloc allocates memory.
@@ -47,6 +51,11 @@ But modern systems work differently.
 
 When you call malloc, the C runtime may ask the kernel for more memory using:
 
+```text
+brk()
+mmap()
+```
+
 The kernel responds by extending the process's virtual address space.
 
 But it does not assign physical RAM yet.
@@ -83,7 +92,7 @@ Every memory access your program makes goes through the MMU.
 
 The program says: I want the byte at address 0x7f3a00001000. The MMU translates that virtual address into a physical address that points to actual RAM.
 
-The **translation table that connects virtual addresses to physical locations **is the** page table.**
+The **translation table that connects virtual addresses to physical locations is the page table.**
 
 The **kernel maintains one for each process**. When the kernel grants your malloc request, it adds entries to your page table.
 
@@ -96,6 +105,17 @@ The kernel creates it on purpose.
 The entry exists so that the MMU knows the address is legal.
 
 But the physical page has not been assigned.
+
+```text
+Virtual Address Space (per process):
+  0x0000000000000000
+  ├── [text]   mapped to physical pages
+  ├── [data]   mapped to physical pages
+  ├── [heap]   partly mapped, partly empty  ← malloc lives here
+  ├── [ ...vast unmapped gap... ]
+  ├── [stack]  mapped on demand
+  0x00007FFFFFFFFFFF
+```
 
 The heap region grows when malloc asks the kernel for more space. But "grows" means the kernel extends the valid address range. It does not fill that range with physical memory.
 
@@ -112,6 +132,10 @@ When it fails, something important happens.
 ## The Fault
 
 Now imagine the first write:
+
+```c
+buf[0] = 'A';
+```
 
 The CPU sends the virtual address to the MMU.
 
@@ -130,6 +154,16 @@ The kernel handles the fault:
 2. zero the page
 3. update page table
 4. restart instruction
+
+```text
+CPU: load [virtual address]
+  ↓
+MMU: page-table walk → valid, but no physical page
+  ↓
+page fault → kernel allocates and maps a page
+  ↓
+CPU retries the instruction → succeeds
+```
 
 The program never notices.
 
@@ -236,7 +270,18 @@ The script triggered the crisis. The database pays the price.
 
 So, sometimes the wrong process dies.
 
-Because of this, Linux provide you a way to make your process immune to OOM killer.
+Because of this, Linux provides a way to make a process immune to the OOM killer.
+
+```bash
+# Check current OOM score
+cat /proc/$(pidof postgres)/oom_score
+
+echo -1000 > /proc/$(pidof postgres)/oom_score_adj
+echo 1000 > /proc/$(pidof backup-script)/oom_score_adj
+
+[Service]
+OOMScoreAdjust=-500
+```
 
 With this, even if a process sacrifice, the system survives.
 
@@ -244,7 +289,17 @@ With this, even if a process sacrifice, the system survives.
 
 Everything begins with one line:
 
+```c
+void *p = malloc(1024);
+```
+
 And unfolds like this:
+
+```text
+malloc() → virtual address → first write → page fault
+→ physical page allocation → fork() copy-on-write
+→ overcommit promises → OOM killer collects the debt
+```
 
 Every step defers cost.
 

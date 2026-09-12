@@ -14,6 +14,18 @@ This article is about what actually happens - not the API, not the commands, but
 
 Most of us carry a mental model that looks something like this:
 
+```text
+Your Code
+   ↓
+D-Bus Daemon (broker)
+   ↓
+Intended Service (process request, send response)
+   ↓
+D-Bus Daemon
+   ↓
+Your Code
+```
+
 A message goes out. A response comes back. Simple.
 
 This model is correct in the same way saying “the kernel just runs processes” is correct. It’s not wrong. It just ignores everything that actually makes the system work.
@@ -27,6 +39,15 @@ The kernel's role is the socket transport - the bytes flowing between processes.
 **Every D-Bus message is serialized into a specific wire format.** This isn't JSON. It's not Protocol Buffers. It's a custom binary format designed for efficiency, but it has costs that most developers never see.
 
 When you call:
+
+```c
+dbus_message_new_method_call(
+    "org.freedesktop.systemd1",           // destination
+    "/org/freedesktop/systemd1",          // path
+    "org.freedesktop.systemd1.Manager",   // interface
+    "RestartUnit"                          // method
+);
+```
 
 What you're actually doing **involves a series of encoding steps**: allocating a message structure in memory, writing the destination service name, validating the object path against a strict format, writing interface and method names as strings, and then embedding arguments into the message body.
 
@@ -50,6 +71,10 @@ This is why your first call to a rarely-used service is often slower than subseq
 
 D-Bus has a feature that most developers use once and forget: passing file descriptors across the bus.
 
+```c
+dbus_message_append_args(msg, DBUS_TYPE_UNIX_FD, &fd, DBUS_TYPE_INVALID);
+```
+
 It feels like you’re just attaching an integer to a message. But that intuition is misleading.
 
 The **file descriptor is not actually sent inside the message**. Instead, the message only carries a reference - an index into a separate list of file descriptors. The real transfer happens outside the message body, through the Unix socket’s ancillary data channel.
@@ -69,6 +94,14 @@ This means FD passing in D-Bus is not just a low-level mechanism - it’s a mech
 **D-Bus signals** are described as "**broadcast**." This is technically true and practically misleading.
 
 When a service emits a signal:
+
+```c
+dbus_connection_emit_signal(conn,
+    "/org/example/signal",
+    "org.example.Signals",      // interface
+    "SomethingHappened",        // member
+    NULL);
+```
 
 Every connected client whose match rules subscribe to that signal receives it. But "broadcast" in D-Bus doesn't mean what you think. **Signals are bus-routed notifications delivered to clients whose match rules subscribe them to the sender, interface, path, or member they care about.**
 
